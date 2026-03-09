@@ -1,7 +1,3 @@
-# hNxr2ADEnipXcoYNXcK5VWfxI4KPVfZWbefUct3q - key
-# https://bnydqorligelcednwxgl.supabase.co - project url
-# eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJueWRxb3JsaWdlbGNlZG53eGdsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTYwMjgzMCwiZXhwIjoyMDg3MTc4ODMwfQ.UmHUoldhlebYBhqZihXteIQnliXSr06fR7E_Xj9f1wI - SupaBase service role
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -15,7 +11,6 @@ import os
 from supabase_client import supabase
 
 app = FastAPI()
-client = OpenAI()
 
 USDA_API_KEY = os.getenv("USDA_API_KEY")
 
