@@ -15,6 +15,15 @@
             margin-bottom: 30px;
         }
 
+        .card {
+            width: min(680px, 92%);
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        }
+
         button {
             font-size: 18px;
             padding: 12px 20px;
@@ -22,16 +31,22 @@
             border: none;
             border-radius: 8px;
             cursor: pointer;
-        }
-
-        #startBtn {
             background-color: #2ecc71;
             color: white;
         }
 
-        #stopBtn {
-            background-color: #e74c3c;
-            color: white;
+        .query-input {
+            width: min(520px, 96%);
+            font-size: 18px;
+            padding: 12px 14px;
+            border-radius: 8px;
+            border: 1px solid #c8d0d7;
+            margin-top: 8px;
+        }
+
+        .hint {
+            color: #4b5563;
+            margin-top: 8px;
         }
 
         table {
@@ -48,11 +63,6 @@
         th {
             background-color: #eee;
         }
-
-        #status {
-            margin-top: 20px;
-            font-size: 18px;
-        }
     </style>
 </head>
 
@@ -60,11 +70,21 @@
 
 <h1>🎤 Voice Calorie Tracker</h1>
 
-<button id="startBtn" onclick="startRecording()">Start Recording</button>
-<button id="stopBtn" onclick="stopRecording()" disabled>Stop Recording</button>
-
-<p id="status">Press "Start Recording" and say a food.</p>
-
+<div class="card">
+    <h2>Temporary Testing Mode: Text Input</h2>
+    <form action="/foods/search" method="get">
+        <input
+            class="query-input"
+            type="text"
+            name="query"
+            placeholder="Example: 2 eggs and 1 banana"
+            required
+        >
+        <br>
+        <button type="submit">Search Nutrition</button>
+    </form>
+    <p class="hint">Use natural language, e.g. "I had one apple and two toast".</p>
+</div>
 
 {% if results %}
 
@@ -163,71 +183,6 @@
 </table>
 
 {% endif %}
-
-
-<script>
-
-let recognition;
-let latestTranscript = "";
-
-function startRecording() {
-
-    document.getElementById("status").innerText = "🎙️ Listening...";
-    document.getElementById("startBtn").disabled = true;
-    document.getElementById("stopBtn").disabled = false;
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.continuous = true;
-
-    recognition.onresult = function(event) {
-
-        const transcript = event.results[event.results.length - 1][0].transcript;
-
-        latestTranscript = transcript;
-
-        document.getElementById("status").innerText = "Heard: " + transcript;
-    };
-
-    recognition.onend = function () {
-
-        if (latestTranscript) {
-
-            document.getElementById("status").innerText =
-                "Processing: " + latestTranscript;
-
-            window.location.href =
-                "/foods/search?query=" + encodeURIComponent(latestTranscript);
-        }
-        else {
-
-            document.getElementById("status").innerText =
-                "No speech detected";
-
-            document.getElementById("startBtn").disabled = false;
-        }
-    };
-
-    recognition.onerror = function(event) {
-        document.getElementById("status").innerText =
-            "Speech error: " + event.error;
-    };
-
-    recognition.start();
-}
-
-function stopRecording() {
-
-    document.getElementById("status").innerText = "Stopping...";
-    document.getElementById("stopBtn").disabled = true;
-
-    recognition.stop();
-}
-
-</script>
 
 </body>
 </html>
