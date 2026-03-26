@@ -1,142 +1,551 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Voice Calorie Tracker</title>
+    <title>Vocalorie Logger</title>
 
     <style>
+        :root {
+            --bg: #f8f4ea;
+            --panel: #fffdf8;
+            --ink: #1f2933;
+            --accent: #0f766e;
+            --accent-alt: #b45309;
+            --muted: #52606d;
+            --danger: #b91c1c;
+            --line: #d9d0bd;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            margin-top: 60px;
-            background-color: #f4f6f8;
+            font-family: "Avenir Next", "Nunito Sans", "Segoe UI", sans-serif;
+            margin: 0;
+            min-height: 100vh;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at top right, #f5e8c9, transparent 40%),
+                radial-gradient(circle at bottom left, #d6f0e8, transparent 45%),
+                var(--bg);
+            padding: 24px 14px 60px;
+        }
+
+        .layout {
+            width: min(860px, 100%);
+            margin: 0 auto;
         }
 
         h1 {
-            margin-bottom: 30px;
+            text-align: center;
+            font-size: clamp(2rem, 3vw, 2.6rem);
+            margin: 8px 0 24px;
+            letter-spacing: 0.02em;
         }
 
-        .card {
-            width: min(680px, 92%);
-            margin: 0 auto;
-            background: #ffffff;
-            border-radius: 12px;
-            padding: 20px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        .panel {
+            background: var(--panel);
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            box-shadow: 0 12px 30px rgba(31, 41, 51, 0.08);
+            padding: 18px;
+            margin-bottom: 18px;
+        }
+
+        .top-controls {
+            display: grid;
+            gap: 10px;
+        }
+
+        label {
+            font-weight: 700;
+            font-size: 0.92rem;
+            color: var(--muted);
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            border-radius: 10px;
+            border: 1px solid var(--line);
+            padding: 11px 12px;
+            font-size: 1rem;
+            color: var(--ink);
+            background: #fff;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 78px;
+        }
+
+        .inline-grid {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
         button {
-            font-size: 18px;
-            padding: 12px 20px;
-            margin: 10px;
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 0.95rem;
+            font-weight: 700;
             cursor: pointer;
-            background-color: #2ecc71;
-            color: white;
+            transition: transform 0.15s ease, opacity 0.2s ease;
         }
 
-        .query-input {
-            width: min(520px, 96%);
-            font-size: 18px;
-            padding: 12px 14px;
-            border-radius: 8px;
-            border: 1px solid #c8d0d7;
-            margin-top: 8px;
+        button:hover {
+            transform: translateY(-1px);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #f3fffd;
+        }
+
+        .btn-secondary {
+            background: #0d9488;
+            color: #f0fdfa;
+        }
+
+        .btn-warm {
+            background: var(--accent-alt);
+            color: #fff7ed;
         }
 
         .hint {
-            color: #4b5563;
+            color: var(--muted);
+            font-size: 0.9rem;
+            margin: 0;
+        }
+
+        .status {
+            min-height: 1.1rem;
+            font-size: 0.95rem;
+            font-weight: 600;
             margin-top: 8px;
         }
 
-        table {
-            margin: 30px auto;
-            border-collapse: collapse;
-            width: 350px;
+        .status.error {
+            color: var(--danger);
         }
 
-        th, td {
-            padding: 10px;
-            border: 1px solid #ccc;
+        .status.ok {
+            color: #065f46;
         }
 
-        th {
-            background-color: #eee;
+        .cards {
+            display: grid;
+            gap: 12px;
+        }
+
+        .meal-card {
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 14px;
+            background: #fffcf5;
+        }
+
+        .meal-card.unresolved {
+            border-color: #e8b4b4;
+            background: #fff7f7;
+        }
+
+        .meal-title {
+            margin: 0 0 8px;
+            font-size: 1.1rem;
+        }
+
+        .meta {
+            color: var(--muted);
+            font-size: 0.9rem;
+            margin: 2px 0 10px;
+        }
+
+        .macro-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .macro-cell {
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            padding: 8px;
+            text-align: center;
+            background: #fff;
+        }
+
+        .macro-label {
+            font-size: 0.72rem;
+            color: var(--muted);
+            margin-bottom: 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .macro-value {
+            font-weight: 800;
+            font-size: 1rem;
+        }
+
+        .card-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .editor {
+            margin-top: 12px;
+            border-top: 1px dashed var(--line);
+            padding-top: 12px;
+            display: none;
+        }
+
+        .editor.open {
+            display: block;
+        }
+
+        .editor-grid {
+            display: grid;
+            gap: 8px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            margin-bottom: 10px;
+        }
+
+        .totals-row {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        @media (max-width: 640px) {
+            .inline-grid,
+            .editor-grid,
+            .macro-grid,
+            .totals-row {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 
 <body>
 
-<h1>🎤 Voice Calorie Tracker</h1>
+<div class="layout">
+    <h1>Vocalorie Logger</h1>
 
-<div class="card">
-    <h2>Temporary Testing Mode: Text Input</h2>
-    <form action="/foods/search" method="get">
-        <input
-            class="query-input"
-            type="text"
-            name="query"
-            placeholder="Example: 2 eggs and 1 banana"
-            required
-        >
-        <br>
-        <button type="submit">Search Nutrition</button>
-    </form>
-    <p class="hint">Use natural language, e.g. "I had one apple and two toast".</p>
+    <section class="panel top-controls">
+        <div>
+            <label for="token">Bearer token (from login)</label>
+            <input id="token" placeholder="Paste JWT access token" autocomplete="off">
+        </div>
+        <div>
+            <label for="transcript">Meal transcript (text-first)</label>
+            <textarea id="transcript" placeholder="Example: I had two eggs and one toast"></textarea>
+        </div>
+        <div class="inline-grid">
+            <button id="resolveBtn" class="btn-primary">Resolve Meal</button>
+            <button id="clearBtn" class="btn-warm">Clear</button>
+        </div>
+        <p class="hint">Each parsed item becomes one staging card. Log it directly or create a personal meal and auto-log.</p>
+        <div id="status" class="status"></div>
+    </section>
+
+    <section class="panel">
+        <h2>Staged Items</h2>
+        <div id="cards" class="cards"></div>
+    </section>
+
+    <section class="panel">
+        <h2>Session Totals</h2>
+        <div id="totals" class="totals-row"></div>
+    </section>
 </div>
 
-{% if results %}
+<script>
+    const tokenInput = document.getElementById("token");
+    const transcriptInput = document.getElementById("transcript");
+    const resolveBtn = document.getElementById("resolveBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const statusEl = document.getElementById("status");
+    const cardsEl = document.getElementById("cards");
+    const totalsEl = document.getElementById("totals");
 
-{% for result in results %}
+    const STORAGE_KEY = "vocalorie_access_token";
+    const state = {
+        items: [],
+        totals: { calories: 0, protein: 0, carbs: 0, fat: 0 }
+    };
 
-<h2>{{ result.food }}</h2>
+    function fmt(value) {
+        const n = Number(value || 0);
+        return Number.isFinite(n) ? n.toFixed(1) : "0.0";
+    }
 
-<table>
-    <tr>
-        <th>Nutrient</th>
-        <th>Amount</th>
-    </tr>
+    function setStatus(message, type = "") {
+        statusEl.textContent = message;
+        statusEl.className = `status ${type}`;
+    }
 
-    <tr>
-        <td>Calories</td>
-        <td>{{ result.calories }}</td>
-    </tr>
+    function authHeaders() {
+        const token = tokenInput.value.trim();
+        if (!token) {
+            throw new Error("Missing bearer token. Please paste your access token.");
+        }
+        return {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+        };
+    }
 
-    <tr>
-        <td>Protein (g)</td>
-        <td>{{ result.protein_g }}</td>
-    </tr>
+    function readEditorValues(item) {
+        const root = document.querySelector(`[data-editor='${item.client_item_id}']`);
+        const name = root.querySelector("[data-field='name']").value.trim();
+        const calories = Number(root.querySelector("[data-field='calories']").value);
+        const protein = Number(root.querySelector("[data-field='protein']").value || 0);
+        const carbs = Number(root.querySelector("[data-field='carbs']").value || 0);
+        const fat = Number(root.querySelector("[data-field='fat']").value || 0);
 
-    <tr>
-        <td>Carbohydrates (g)</td>
-        <td>{{ result.carbs_g }}</td>
-    </tr>
+        if (!name) {
+            throw new Error("Food name is required.");
+        }
+        if (!Number.isFinite(calories) || calories < 0) {
+            throw new Error("Calories must be a non-negative number.");
+        }
+        if ([protein, carbs, fat].some(v => !Number.isFinite(v) || v < 0)) {
+            throw new Error("Protein, carbs, and fat must be non-negative numbers.");
+        }
 
-    <tr>
-        <td>Fat (g)</td>
-        <td>{{ result.fat_g }}</td>
-    </tr>
+        return { name, calories, protein, carbs, fat };
+    }
 
-    <tr>
-        <td>Sugar (g)</td>
-        <td>{{ result.sugar_g }}</td>
-    </tr>
+    async function apiFetch(path, options = {}) {
+        const response = await fetch(path, options);
+        let payload = {};
+        try {
+            payload = await response.json();
+        } catch {
+            payload = {};
+        }
 
-    <tr>
-        <td>Fiber (g)</td>
-        <td>{{ result.fiber_g }}</td>
-    </tr>
+        if (!response.ok) {
+            const detail = payload.detail || "Request failed";
+            throw new Error(detail);
+        }
 
-    <tr>
-        <td>Vitamin D (mcg)</td>
-        <td>{{ result.vitamin_d_mcg }}</td>
-    </tr>
-</table>
+        return payload;
+    }
 
-{% endfor %}
+    async function resolveMeal() {
+        const transcript = transcriptInput.value.trim();
+        if (!transcript) {
+            setStatus("Please enter a meal transcript.", "error");
+            return;
+        }
 
-{% endif %}
+        resolveBtn.disabled = true;
+        setStatus("Resolving meal...", "");
+
+        try {
+            const payload = await apiFetch("/foods/process", {
+                method: "POST",
+                headers: authHeaders(),
+                body: JSON.stringify({ raw_transcript: transcript })
+            });
+
+            state.items = payload.staged_items || payload.results || [];
+            state.totals = payload.totals || { calories: 0, protein: 0, carbs: 0, fat: 0 };
+
+            if (!state.items.length) {
+                setStatus("No items were parsed from that transcript.", "error");
+            } else {
+                setStatus("Staging ready. Choose Log Meal or Create Meal per item.", "ok");
+            }
+
+            render();
+        } catch (error) {
+            setStatus(error.message || "Failed to resolve meal.", "error");
+        } finally {
+            resolveBtn.disabled = false;
+        }
+    }
+
+    async function logItem(item) {
+        const button = document.querySelector(`[data-log='${item.client_item_id}']`);
+        button.disabled = true;
+
+        try {
+            await apiFetch("/foods/confirm", {
+                method: "POST",
+                headers: authHeaders(),
+                body: JSON.stringify({
+                    items: [
+                        {
+                            name: item.name,
+                            calories: Number(item.calories || 0),
+                            protein: Number(item.protein || 0),
+                            carbs: Number(item.carbs || 0),
+                            fat: Number(item.fat || 0)
+                        }
+                    ]
+                })
+            });
+
+            setStatus(`Logged ${item.name}.`, "ok");
+        } catch (error) {
+            setStatus(error.message || "Failed to log meal.", "error");
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    function toggleEditor(itemId) {
+        const editor = document.querySelector(`[data-editor='${itemId}']`);
+        editor.classList.toggle("open");
+    }
+
+    async function createAndLog(item) {
+        const saveBtn = document.querySelector(`[data-save='${item.client_item_id}']`);
+        saveBtn.disabled = true;
+
+        try {
+            const values = readEditorValues(item);
+
+            await apiFetch("/foods/manual", {
+                method: "POST",
+                headers: authHeaders(),
+                body: JSON.stringify({
+                    food_name: values.name,
+                    calories: values.calories,
+                    protein: values.protein,
+                    carbs: values.carbs,
+                    fat: values.fat,
+                    destination: "personal"
+                })
+            });
+
+            await apiFetch("/foods/confirm", {
+                method: "POST",
+                headers: authHeaders(),
+                body: JSON.stringify({
+                    items: [
+                        {
+                            name: values.name,
+                            calories: values.calories,
+                            protein: values.protein,
+                            carbs: values.carbs,
+                            fat: values.fat
+                        }
+                    ]
+                })
+            });
+
+            setStatus(`Created personal meal and logged ${values.name}.`, "ok");
+            toggleEditor(item.client_item_id);
+        } catch (error) {
+            setStatus(error.message || "Failed to create or log meal.", "error");
+        } finally {
+            saveBtn.disabled = false;
+        }
+    }
+
+    function cardTemplate(item) {
+        const unresolvedClass = item.resolved ? "" : "unresolved";
+        const unresolvedNote = item.resolved ? "" : "<p class='meta'>No resolver match found. Create a personal meal to continue.</p>";
+
+        return `
+            <article class="meal-card ${unresolvedClass}">
+                <h3 class="meal-title">${item.quantity} ${item.unit} - ${item.name}</h3>
+                <p class="meta">Source: ${item.source || "unknown"} | ${item.category || "unknown"}</p>
+                ${unresolvedNote}
+                <div class="macro-grid">
+                    <div class="macro-cell"><div class="macro-label">Calories</div><div class="macro-value">${fmt(item.calories)}</div></div>
+                    <div class="macro-cell"><div class="macro-label">Protein</div><div class="macro-value">${fmt(item.protein)} g</div></div>
+                    <div class="macro-cell"><div class="macro-label">Carbs</div><div class="macro-value">${fmt(item.carbs)} g</div></div>
+                    <div class="macro-cell"><div class="macro-label">Fat</div><div class="macro-value">${fmt(item.fat)} g</div></div>
+                </div>
+                <div class="card-actions">
+                    <button class="btn-primary" data-log="${item.client_item_id}" ${item.resolved ? "" : "disabled"}>Log Meal</button>
+                    <button class="btn-secondary" data-edit="${item.client_item_id}">Create Meal</button>
+                </div>
+                <div class="editor" data-editor="${item.client_item_id}">
+                    <div class="editor-grid">
+                        <input data-field="name" value="${item.name || ""}" placeholder="Food name">
+                        <input data-field="calories" type="number" min="0" step="0.1" value="${Number(item.calories || 0)}" placeholder="Calories">
+                        <input data-field="protein" type="number" min="0" step="0.1" value="${Number(item.protein || 0)}" placeholder="Protein (g)">
+                        <input data-field="carbs" type="number" min="0" step="0.1" value="${Number(item.carbs || 0)}" placeholder="Carbs (g)">
+                        <input data-field="fat" type="number" min="0" step="0.1" value="${Number(item.fat || 0)}" placeholder="Fat (g)">
+                    </div>
+                    <button class="btn-warm" data-save="${item.client_item_id}">Save To Personal + Auto Log</button>
+                </div>
+            </article>
+        `;
+    }
+
+    function renderTotals() {
+        const t = state.totals;
+        totalsEl.innerHTML = `
+            <div class="macro-cell"><div class="macro-label">Calories</div><div class="macro-value">${fmt(t.calories)}</div></div>
+            <div class="macro-cell"><div class="macro-label">Protein</div><div class="macro-value">${fmt(t.protein)} g</div></div>
+            <div class="macro-cell"><div class="macro-label">Carbs</div><div class="macro-value">${fmt(t.carbs)} g</div></div>
+            <div class="macro-cell"><div class="macro-label">Fat</div><div class="macro-value">${fmt(t.fat)} g</div></div>
+        `;
+    }
+
+    function bindActions() {
+        state.items.forEach((item) => {
+            const logBtn = document.querySelector(`[data-log='${item.client_item_id}']`);
+            if (logBtn) {
+                logBtn.addEventListener("click", () => logItem(item));
+            }
+
+            const editBtn = document.querySelector(`[data-edit='${item.client_item_id}']`);
+            if (editBtn) {
+                editBtn.addEventListener("click", () => toggleEditor(item.client_item_id));
+            }
+
+            const saveBtn = document.querySelector(`[data-save='${item.client_item_id}']`);
+            if (saveBtn) {
+                saveBtn.addEventListener("click", () => createAndLog(item));
+            }
+        });
+    }
+
+    function render() {
+        cardsEl.innerHTML = state.items.map(cardTemplate).join("");
+        renderTotals();
+        bindActions();
+    }
+
+    function clearAll() {
+        state.items = [];
+        state.totals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+        transcriptInput.value = "";
+        setStatus("Cleared staged items.", "");
+        render();
+    }
+
+    tokenInput.value = localStorage.getItem(STORAGE_KEY) || "";
+    tokenInput.addEventListener("input", () => {
+        localStorage.setItem(STORAGE_KEY, tokenInput.value.trim());
+    });
+
+    resolveBtn.addEventListener("click", resolveMeal);
+    clearBtn.addEventListener("click", clearAll);
+
+    render();
+</script>
 
 </body>
 </html>

@@ -3,8 +3,6 @@
 ## 1. High-Level Architecture
 Vocalorie is a voice-first dietary tracking application. The system leverages an LLM to parse natural language voice inputs into structured queries, resolving them against a tiered database architecture to log nutritional metrics.
 
-
-
 * **Frontend:** HTML/JS with Jinja2 Templating.
 * **Backend:** Python / FastAPI.
 * **Database:** Supabase (PostgreSQL).
@@ -17,44 +15,41 @@ Vocalorie is a voice-first dietary tracking application. The system leverages an
 ## 2. Frontend Page Specifications
 
 ### Page 1: Logging & Food Creation (`/log`)
-The core interaction loop for the user.
+The core interaction loop for the user. Explicitly avoids auto-logging to build trust and allow for frictionless corrections.
+
 * **Voice Interface:** Uses the Web Speech API to capture speech, transcribe it, and send the text to the backend.
-* **Data Display:** Renders the returned JSON from the Food Resolver, showing the top identified item for each parsed food (Name, Calories, Macros).
-* **The Fallback/Correction UI:** * If the Food Resolver fails or the user rejects the top result, a "Manual Entry" form is exposed.
-  * The user can manually input the food details (Name, Brand, Calories, Macros).
-  * They select a radio button destination: **[Save to Personal DB]** or **[Save to Crowdsourced DB]**.
-  * Once saved, they can re-run the voice prompt, and Phase 2 or Phase 3 of the Food Resolver will catch it immediately.
+* **The Staging Card (Receipt):** Instead of auto-logging, the UI renders the single best guess returned by the Food Resolver as a staging card (e.g., "1 Bowl - Bojangles Mac n Cheese (450 kcal)").
+* **The Commit Action:** A primary "[Log Meal]" button that, when tapped, commits the staged items to the user's daily journal.
+* **The Override (Personal DB):** An "[Edit]" or "[Change]" button next to the staged item. Tapping this exposes a manual entry form prepopulated with the parsed food name. The user inputs their custom macros (e.g., for a homemade version) and hits "[Save & Update]". This silently commits the new version to their `personal_foods` database tier and updates the Staging Card for final logging.
 
 ### Page 2: Food Journal (`/journal`)
 The historical tracking and aggregation dashboard.
+
 * **Date Selection:** Defaults to `TODAY`. Users can select past dates to view history.
 * **Daily Log List:** Displays all items from the `daily_logs` table for the selected date and `user_id`.
-* **Aggregation Metrics:** * Calculates the `SUM()` of Calories, Protein, Carbs, and Fat for the day.
-  * Compares the total consumed calories against the user's `daily_calorie_goal`.
+* **Aggregation Metrics:** Calculates the `SUM()` of Calories, Protein, Carbs, and Fat for the day, and compares the total consumed calories against the user's `daily_calorie_goal`.
 
 ### Page 3: Profile Editing (`/profile`)
 Standard account management.
+
 * **Editable Fields:** `display_name`, `daily_calorie_goal` (essential for the Journal's math), and password reset.
 
 ### Page 4: Authentication (`/login`, `/register`)
-* Standard email/password forms.
-* Posts to backend routes that interface with Supabase Auth to establish the user session.
+Standard identity management.
+
+* **Forms:** Standard email/password inputs.
+* **Integration:** Posts to backend routes that interface with Supabase Auth to establish the user session.
 
 ---
 
 ## 3. The Data Parsing & Logging Flow
 
-
-
 When a user speaks into the Logging Page, the backend executes the following pipeline:
 
 **A. NLP Entity Extraction (Groq LLM)**
-The raw transcript (e.g., *"I had two eggs, a slice of whole wheat Dave's Killer Bread, and a glass of whole milk"*) is parsed into a strict JSON array capturing:
-* `item` (Base food)
-* `qty` (Number)
-* `descriptors` (e.g., "whole", "scrambled")
-* `brand` (e.g., "Dave's Killer Bread")
+The raw transcript is parsed into a strict JSON array capturing `item`, `quantity`, `unit`, `descriptors`, `brand`, and a `fallback_search_query`.
 
+```python
 system_prompt = """
 You are a strict dietary data extraction API. 
 Your only job is to analyze the user's transcript and extract the food items they ate.
@@ -99,15 +94,16 @@ Example Output:
 
 Process the following transcript:
 """
+```
 
 **B. The Food Resolver Cascade**
 For *each* item in the extracted list, the backend checks:
 1. **Personal DB:** Matches `user_id` + `item` + `descriptors`.
 2. **Crowdsourced DB:** Matches global community entries.
-3. **USDA API (Smart Fetch):** If no DB match, queries USDA. Uses `brand` to filter for Branded data, or `descriptors` to find the exact Foundation match (e.g., "milk" + "whole"). Caches the result in the Crowdsourced DB for future use.
+3. **USDA API (Smart Fetch):** If no DB match, queries USDA. Uses `brand` to filter for Branded data, or `descriptors` to find the exact Foundation match. Caches the result in the Crowdsourced DB for future use.
 
-**C. Journal Commit**
-Once the user confirms the parsed meal on the UI, the backend writes the final aggregated items into the `daily_logs` table, attaching the `user_id` and `logged_at` timestamp.
+**C. Stage, Then Commit**
+The backend returns the resolved JSON array to the frontend. The frontend holds this data in the "Staging Card". Once the user manually verifies the data and clicks "[Log Meal]", the frontend sends a final POST request to the backend, which writes the aggregated items into the `daily_logs` table with the `user_id` and `logged_at` timestamp.
 
 ---
 

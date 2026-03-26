@@ -296,11 +296,12 @@ async def _process_food_pipeline(raw_transcript: str, user_id: str):
     parsed_items = await parse_raw_transcript(raw_transcript)
 
     results = []
+    staged_items = []
     totals = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
     unresolved_items = []
 
     # 2. Resolve each item via the 3-tier cascade.
-    for item in parsed_items:
+    for index, item in enumerate(parsed_items):
         food_item = str(item.get("food_name", item.get("item", ""))).strip()
         if not food_item:
             continue
@@ -317,32 +318,52 @@ async def _process_food_pipeline(raw_transcript: str, user_id: str):
             fallback_search_query=fallback_search_query,
         )
 
-        if not food_data:
-            unresolved_items.append(item)
-            continue
-
         raw_qty = item.get("quantity", item.get("qty", 1))
         try:
             qty = float(raw_qty)
         except (TypeError, ValueError):
             qty = 1.0
 
+        unit = item.get("unit", "serving")
+
+        if not food_data:
+            unresolved = {
+                "client_item_id": index,
+                "name": food_item,
+                "quantity": qty,
+                "unit": unit,
+                "calories": 0,
+                "protein": 0,
+                "carbs": 0,
+                "fat": 0,
+                "source": "unresolved",
+                "category": "unknown",
+                "resolved": False,
+            }
+            unresolved_items.append(unresolved)
+            staged_items.append(unresolved)
+            continue
+
         calories = (food_data.get("calories") or 0) * qty
         protein = (food_data.get("protein", food_data.get("protein_g", 0)) or 0) * qty
         carbs = (food_data.get("carbs", food_data.get("carbs_g", 0)) or 0) * qty
         fat = (food_data.get("fat", food_data.get("fat_g", 0)) or 0) * qty
 
-        results.append({
+        resolved = {
+            "client_item_id": index,
             "name": food_data.get("food_name", food_item).strip(),
             "quantity": qty,
-            "unit": item.get("unit", "serving"),
+            "unit": unit,
             "calories": calories,
             "protein": protein,
             "carbs": carbs,
             "fat": fat,
             "source": food_data.get("source", "internal"),
             "category": food_data.get("category", "unknown"),
-        })
+            "resolved": True,
+        }
+        results.append(resolved)
+        staged_items.append(resolved)
 
         totals["calories"] += calories
         totals["protein"] += protein
@@ -352,6 +373,7 @@ async def _process_food_pipeline(raw_transcript: str, user_id: str):
     return {
         "status": "success",
         "results": results,
+        "staged_items": staged_items,
         "totals": totals,
         "unresolved_items": unresolved_items,
     }
@@ -429,11 +451,24 @@ async def add_manual_food(
         row["user_id"] = user_id
 
     try:
-        supabase.table(target_table).insert(row).execute()
+        response = supabase.table(target_table).insert(row).execute()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save manual food: {exc}") from exc
 
-    return {"status": "success", "table": target_table}
+    inserted = (response.data or [None])[0] if hasattr(response, "data") else None
+
+    return {
+        "status": "success",
+        "table": target_table,
+        "food": {
+            "name": row.get("food_name"),
+            "calories": row.get("calories"),
+            "protein": row.get("protein"),
+            "carbs": row.get("carbs"),
+            "fat": row.get("fat"),
+        },
+        "inserted": inserted,
+    }
 
 
 @app.get("/journal")

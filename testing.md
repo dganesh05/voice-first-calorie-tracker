@@ -247,6 +247,110 @@ Expected:
 - update returns status success
 - follow-up read reflects changes
 
+### 5.9 New Search + Add Flow (Staged Logger + Create Meal)
+
+This validates the new feature where transcript search returns staged items, then each item can be logged directly or created in personal foods and auto-logged.
+
+Step A: Process transcript and inspect staged items
+
+curl -s -X POST http://127.0.0.1:8000/foods/process \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "raw_transcript":"I had two eggs and dragonfruit protein oats"
+  }'
+
+Expected:
+
+- status success
+- staged_items array exists
+- each staged item has:
+  - client_item_id
+  - name
+  - quantity
+  - unit
+  - calories/protein/carbs/fat
+  - resolved (true or false)
+- unresolved items appear in unresolved_items and should also appear in staged_items with resolved false
+
+Step B: Log one staged item directly
+
+curl -s -X POST http://127.0.0.1:8000/foods/confirm \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items":[
+      {"name":"2 egg","calories":140,"protein":12,"carbs":1,"fat":10}
+    ]
+  }'
+
+Expected:
+
+- status success
+- inserted equals 1
+
+Step C: Create custom meal (personal) for an unresolved/override case
+
+curl -s -X POST http://127.0.0.1:8000/foods/manual \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "food_name":"dragonfruit protein oats",
+    "calories":420,
+    "protein":28,
+    "carbs":48,
+    "fat":12,
+    "destination":"personal"
+  }'
+
+Expected:
+
+- status success
+- table equals personal_foods
+- food object present with name/calories/protein/carbs/fat
+
+Step D: Auto-log equivalent payload after create (API parity with frontend)
+
+curl -s -X POST http://127.0.0.1:8000/foods/confirm \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items":[
+      {"name":"dragonfruit protein oats","calories":420,"protein":28,"carbs":48,"fat":12}
+    ]
+  }'
+
+Expected:
+
+- status success
+- inserted equals 1
+
+Step E: Re-process transcript to confirm personal-food resolution catches it
+
+curl -s -X POST http://127.0.0.1:8000/foods/process \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "raw_transcript":"I had dragonfruit protein oats"
+  }'
+
+Expected:
+
+- staged_items includes dragonfruit protein oats
+- resolved should now be true for that item (personal DB hit)
+- source should be manual/internal tier (not unresolved)
+
+Step F: Verify journal totals include both direct-log and create+log entries
+
+curl -s "http://127.0.0.1:8000/journal?journal_date=$(date +%F)" \
+  -H "Authorization: Bearer $TOKEN"
+
+Expected:
+
+- status success
+- logs include inserted rows from Steps B and D
+- totals.calories increased by expected combined amount
+
 ## 6. Negative Tests (Must Pass)
 
 Missing token:
