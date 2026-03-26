@@ -1,4 +1,6 @@
 import os
+import re
+import string
 from typing import Any
 
 import httpx
@@ -34,6 +36,20 @@ def _to_number(value: Any) -> float:
 
 def _normalize_query(food_item: str) -> str:
     return str(food_item or "").strip().lower()
+
+
+def _canonicalize_text(value: str) -> str:
+    text = str(value or "").lower()
+    text = text.translate(str.maketrans("", "", string.punctuation))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _collect_lookup_terms(food_item: str) -> list[str]:
+    canonical = _canonicalize_text(food_item)
+    terms = [term for term in canonical.split() if term]
+    if canonical and canonical not in terms:
+        terms.insert(0, canonical)
+    return terms[:4]
 
 
 def _normalize_food_record(record: dict, fallback_name: str) -> dict:
@@ -229,6 +245,24 @@ def _rank_candidate(record: dict, descriptors: list[str] | None, brand: str | No
     return score
 
 
+def _match_score(food_item: str, record: dict) -> int:
+    query = _canonicalize_text(food_item)
+    candidate = _canonicalize_text(record.get("food_name") or "")
+    if not query or not candidate:
+        return 0
+    if query == candidate:
+        return 12
+    if query in candidate:
+        return 8
+
+    query_tokens = set(query.split())
+    candidate_tokens = set(candidate.split())
+    if not query_tokens or not candidate_tokens:
+        return 0
+    overlap = len(query_tokens & candidate_tokens)
+    return overlap
+
+
 def _lookup_personal_food(
     food_item: str,
     user_id: str,
@@ -236,8 +270,12 @@ def _lookup_personal_food(
     brand: str | None = None,
 ):
     normalized = _normalize_query(food_item)
+    terms = _collect_lookup_terms(food_item)
     try:
-        response = (
+        candidates: list[dict] = []
+        seen_ids: set[str] = set()
+
+        exact_response = (
             supabase.table("personal_foods")
             .select("*")
             .eq("user_id", user_id)
@@ -245,9 +283,37 @@ def _lookup_personal_food(
             .limit(5)
             .execute()
         )
-        if not response.data:
+        for row in exact_response.data or []:
+            row_id = str(row.get("id") or "")
+            if row_id and row_id in seen_ids:
+                continue
+            if row_id:
+                seen_ids.add(row_id)
+            candidates.append(row)
+
+        for term in terms:
+            fuzzy_response = (
+                supabase.table("personal_foods")
+                .select("*")
+                .eq("user_id", user_id)
+                .ilike("food_name", f"%{term}%")
+                .limit(10)
+                .execute()
+            )
+            for row in fuzzy_response.data or []:
+                row_id = str(row.get("id") or "")
+                if row_id and row_id in seen_ids:
+                    continue
+                if row_id:
+                    seen_ids.add(row_id)
+                candidates.append(row)
+
+        if not candidates:
             return None
-        return max(response.data, key=lambda rec: _rank_candidate(rec, descriptors, brand))
+        return max(
+            candidates,
+            key=lambda rec: _match_score(food_item, rec) + _rank_candidate(rec, descriptors, brand),
+        )
     except Exception:
         # Treat connectivity and setup issues (missing table, auth, etc.) as cache miss.
         return None
@@ -259,17 +325,48 @@ def _lookup_global_food(
     brand: str | None = None,
 ):
     normalized = _normalize_query(food_item)
+    terms = _collect_lookup_terms(food_item)
     try:
-        response = (
+        candidates: list[dict] = []
+        seen_ids: set[str] = set()
+
+        exact_response = (
             supabase.table("global_foods")
             .select("*")
             .ilike("food_name", normalized)
             .limit(5)
             .execute()
         )
-        if not response.data:
+        for row in exact_response.data or []:
+            row_id = str(row.get("id") or "")
+            if row_id and row_id in seen_ids:
+                continue
+            if row_id:
+                seen_ids.add(row_id)
+            candidates.append(row)
+
+        for term in terms:
+            fuzzy_response = (
+                supabase.table("global_foods")
+                .select("*")
+                .ilike("food_name", f"%{term}%")
+                .limit(10)
+                .execute()
+            )
+            for row in fuzzy_response.data or []:
+                row_id = str(row.get("id") or "")
+                if row_id and row_id in seen_ids:
+                    continue
+                if row_id:
+                    seen_ids.add(row_id)
+                candidates.append(row)
+
+        if not candidates:
             return None
-        return max(response.data, key=lambda rec: _rank_candidate(rec, descriptors, brand))
+        return max(
+            candidates,
+            key=lambda rec: _match_score(food_item, rec) + _rank_candidate(rec, descriptors, brand),
+        )
     except Exception:
         # Treat connectivity and setup issues (missing table, auth, etc.) as cache miss.
         return None

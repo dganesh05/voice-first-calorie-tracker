@@ -2,8 +2,6 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 import os
-import re
-import string
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from pydantic import BaseModel
@@ -16,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from supabase_client import supabase
 from food_resolver import resolve_food_item
 from llm_parser import parse_raw_transcript
+from transcript_parser import parse_text_transcript
 
 app = FastAPI()
 
@@ -232,106 +231,18 @@ async def health_supabase():
         }
 
 
-def convert_number_words(query: str):
-
-    number_map = {
-        "one": "1",
-        "two": "2",
-        "three": "3",
-        "four": "4",
-        "five": "5",
-        "six": "6",
-        "seven": "7",
-        "eight": "8",
-        "nine": "9",
-        "ten": "10"
-    }
-
-    words = query.split()
-
-    converted = [number_map.get(w, w) for w in words]
-
-    return " ".join(converted)
-
-
-def clean_voice_input(query: str):
-
-    fillers = [
-        "i ate",
-        "i had",
-        "i just ate",
-        "for breakfast",
-        "for lunch",
-        "for dinner"
-    ]
-
-    query = query.lower()
-
-    for f in fillers:
-        query = query.replace(f, "")
-
-    query = query.translate(str.maketrans('', '', string.punctuation))
-
-    return query.strip()
-
-
-# Improved splitting logic
-def split_foods(query: str):
-
-    # normalize separators
-    query = query.replace(" with ", " and ")
-    query = query.replace("&", " and ")
-    query = query.replace(",", " and ")
-
-    foods = [f.strip() for f in query.split(" and ")]
-
-    # remove articles like "a banana"
-    cleaned = []
-    for food in foods:
-        words = food.split()
-        if words and words[0] in ["a", "an", "the"]:
-            food = " ".join(words[1:])
-        cleaned.append(food)
-
-    return cleaned
-
-
-def parse_food_quantity(food_phrase: str):
-
-    match = re.match(r"(\d+)\s+(.*)", food_phrase)
-
-    if match:
-        quantity = int(match.group(1))
-        food_name = match.group(2)
-    else:
-        quantity = 1
-        food_name = food_phrase
-
-    return quantity, food_name
-
-
 @app.get("/foods/search", response_class=HTMLResponse)
 async def usda_api(request: Request, query: str, user_id: str = "anonymous"):
-
-    query = clean_voice_input(query)
-    query = convert_number_words(query)
-
-    foods_to_search = split_foods(query)
+    parsed_items = parse_text_transcript(query)
 
     results = []
 
-    totals = {
-        "calories": 0,
-        "protein_g": 0,
-        "carbs_g": 0,
-        "fat_g": 0,
-        "sugar_g": 0,
-        "fiber_g": 0,
-        "vitamin_d_mcg": 0
-    }
+    for item in parsed_items:
+        quantity = item.get("quantity", 1) or 1
+        food_query = str(item.get("lookup_query") or item.get("food_name") or "").strip()
+        if not food_query:
+            continue
 
-    for food_phrase in foods_to_search:
-        quantity, food_query = parse_food_quantity(food_phrase)
         resolved_food = await resolve_food_item(food_query, user_id)
 
         if not resolved_food:
@@ -360,14 +271,6 @@ async def usda_api(request: Request, query: str, user_id: str = "anonymous"):
 
         results.append(result)
 
-        totals["calories"] += result["calories"]
-        totals["protein_g"] += result["protein_g"]
-        totals["carbs_g"] += result["carbs_g"]
-        totals["fat_g"] += result["fat_g"]
-        totals["sugar_g"] += result["sugar_g"]
-        totals["fiber_g"] += result["fiber_g"]
-        totals["vitamin_d_mcg"] += result["vitamin_d_mcg"]
-
         try:
             supabase.table("food_searches").insert({
                 "food_name": result["food"],
@@ -384,7 +287,6 @@ async def usda_api(request: Request, query: str, user_id: str = "anonymous"):
         "front_end.html",
         {
             "results": results,
-            "totals": totals
         }
     )
 
