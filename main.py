@@ -188,7 +188,7 @@ async def fetch_usda(food_name: str):
             "Protein": "protein_g",
             "Carbohydrate, by difference": "carbs_g",
             "Total lipid (fat)": "fat_g",
-            "Sugars": "sugar_g",
+            "Sugars, total including NLEA": "sugar_g",
             "Fiber, total dietary": "fiber_g",
             "Vitamin D (D2 + D3)": "vitamin_d_mcg",
         }
