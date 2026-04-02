@@ -110,17 +110,6 @@ This includes:
 - Combo meals, plates, bowls, or typical pairings
 - Foods served together (main + sides)
 
-Examples:
-- "pasta and salad" → SINGLE DISH
-- "burger and fries" → SINGLE DISH
-- "steak and mashed potatoes" → SINGLE DISH
-- "eggs toast and bacon" → SINGLE DISH
-- "chicken alfredo pasta with mushrooms and onions" → SINGLE DISH
-- "rice chicken and broccoli" → SINGLE DISH
-
-IMPORTANT:
-Sides, toppings, and accompaniments are part of the SAME dish.
-
 -----------------------------------
 
 B. MULTIPLE FOODS (ONLY WITH STRONG EVIDENCE)
@@ -132,69 +121,118 @@ STRONG separation signals:
 - Time separation:
   "later", "after", "then", "for dessert"
 - Explicit separation:
-  "separately", "on the side by itself"
-- Different consumption actions:
+  "separately", "on its own", "by itself"
+- Different actions:
   "ate X and drank Y later"
-- Clearly unrelated items:
-  "apple, protein shake, and vitamins"
-
-Examples:
-- "2 eggs and 1 cup milk" → LIST
-- "I had pasta and later drank milk" → LIST
-- "apple and protein shake" → LIST
 
 -----------------------------------
 CRITICAL EDGE CASE RULES
 -----------------------------------
 
-1. "AND" RULE (VERY IMPORTANT)
-- Default: treat "and" as SAME DISH
-- ONLY split if strong separation signals exist
+1. "AND" RULE
+- Default: SAME DISH
+- Only split if strong separation signals exist
 
-2. BREAKFAST PLATES
-- "eggs toast bacon" → SINGLE DISH
+2. BREAKFAST / COMBO PLATES
+- Multiple foods listed together → SINGLE DISH
 
 3. DRINKS
-- Included in dish if part of meal:
-  "pancakes and coffee" → SINGLE DISH
-- Separate ONLY if clearly independent:
-  "coffee later" → separate
+- Included in dish if part of meal
+- Separate ONLY if clearly consumed independently
 
 4. "WITH" RULE
 - ALWAYS SINGLE DISH
-- Never split ingredients after "with"
 
 5. "ON THE SIDE"
-- Still SINGLE DISH unless explicitly stated as separate consumption
+- STILL SINGLE DISH unless explicitly consumed separately
 
 -----------------------------------
 PARSING RULES
 -----------------------------------
 
 1. QUANTITIES
-- Convert number words to integers:
-  "one" → 1, "two" → 2, "a/an" → 1
-- If missing, default to 1 ONLY for separate food items
-- DO NOT assign quantity to "dish"
+- Convert number words to integers
+- "a/an" → 1
+- Only apply to separate food items
+- NEVER assign quantity to "dish"
 
 2. UNITS
 - Extract only if explicitly stated
 - Keep lowercase and singular
-- Do NOT guess units
+- Do NOT guess
 
 3. FOOD NORMALIZATION
-- Simplify food names:
+- Simplify names:
   "scrambled eggs" → "egg"
   "a glass of milk" → "milk"
 
-4. DISH PRESERVATION (EXTREMELY CRITICAL)
-- Preserve FULL phrase:
-  "pasta and salad with chicken and dressing"
-- Do NOT split components
+4. DISH PRESERVATION
+- Preserve full description
+- Do NOT split ingredients
 
-5. IGNORE NON-FOOD TEXT
-- Remove filler phrases:
-  "I had", "for lunch", etc.
+5. IGNORE FILLER TEXT
+- Ignore phrases like:
+  "I had", "for lunch", "today", etc.
+
+-----------------------------------
+FEW-SHOT EXAMPLES (CRITICAL)
+-----------------------------------
+
+Input: "2 eggs and 1 cup milk"
+Output:
+[
+  {"food": "egg", "quantity": 2},
+  {"food": "milk", "quantity": 1, "unit": "cup"}
+]
+
+---
+
+Input: "chicken alfredo pasta with mushrooms and onions"
+Output:
+{
+  "dish": "chicken alfredo pasta with mushrooms and onions"
+}
+
+---
+
+Input: "pasta and salad"
+Output:
+{
+  "dish": "pasta and salad"
+}
+
+---
+
+Input: "eggs toast and bacon"
+Output:
+{
+  "dish": "eggs toast and bacon"
+}
+
+---
+
+Input: "burger and fries with a drink"
+Output:
+{
+  "dish": "burger and fries with a drink"
+}
+
+---
+
+Input: "I had pasta and later drank milk"
+Output:
+[
+  {"food": "pasta", "quantity": 1},
+  {"food": "milk", "quantity": 1}
+]
+
+---
+
+Input: "coffee and a bagel"
+Output:
+{
+  "dish": "coffee and bagel"
+}
 
 -----------------------------------
 FINAL INSTRUCTION
