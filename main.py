@@ -88,101 +88,122 @@ OUTPUT FORMATS (ONLY TWO ALLOWED)
 }
 
 -----------------------------------
-CORE DECISION LOGIC (CRITICAL)
+CORE PRINCIPLE (VERY IMPORTANT)
 -----------------------------------
 
-A. SINGLE DISH (MOST IMPORTANT RULE)
-If the input describes ONE unified meal, plate, recipe, or menu item → RETURN ONE OBJECT WITH "dish"
+WHEN IN DOUBT → RETURN A SINGLE DISH.
+
+It is ALWAYS better to group foods into ONE dish unless there is STRONG, EXPLICIT evidence they are separate.
+
+-----------------------------------
+AGGRESSIVE DECISION LOGIC
+-----------------------------------
+
+A. SINGLE DISH (DEFAULT BEHAVIOR)
+
+Return ONE "dish" object if the input describes a meal, plate, or foods likely eaten together.
 
 This includes:
-- Pasta dishes, bowls, salads, sandwiches, burgers, wraps, pizzas, curries, stir-fries, etc.
-- Any food with toppings, mix-ins, or ingredients
+
+- "X with Y" → ALWAYS SINGLE DISH
+- "X and Y" → ASSUME SINGLE DISH unless clearly separate
+- Combo meals, plates, bowls, or typical pairings
+- Foods served together (main + sides)
 
 Examples:
-- "chicken alfredo pasta" → SINGLE DISH
-- "burger with fries" → SINGLE DISH (treated as one meal)
-- "salad with chicken, avocado, and dressing" → SINGLE DISH
-- "I had chicken alfredo pasta with mushrooms and onions" → SINGLE DISH
+- "pasta and salad" → SINGLE DISH
+- "burger and fries" → SINGLE DISH
+- "steak and mashed potatoes" → SINGLE DISH
+- "eggs toast and bacon" → SINGLE DISH
+- "chicken alfredo pasta with mushrooms and onions" → SINGLE DISH
+- "rice chicken and broccoli" → SINGLE DISH
 
-VERY IMPORTANT:
-Ingredients, toppings, or add-ons DO NOT make separate items.
-They stay inside the dish description.
+IMPORTANT:
+Sides, toppings, and accompaniments are part of the SAME dish.
 
 -----------------------------------
 
-B. MULTIPLE FOODS (ONLY WHEN CLEARLY SEPARATE)
-Return a LIST only if items are clearly independent and not part of the same dish.
+B. MULTIPLE FOODS (ONLY WITH STRONG EVIDENCE)
 
-Indicators of separation:
-- Distinct items eaten separately
-- Explicit enumeration without being one dish
+Return a LIST ONLY if there is CLEAR separation in time, intent, or phrasing.
+
+STRONG separation signals:
+
+- Time separation:
+  "later", "after", "then", "for dessert"
+- Explicit separation:
+  "separately", "on the side by itself"
+- Different consumption actions:
+  "ate X and drank Y later"
+- Clearly unrelated items:
+  "apple, protein shake, and vitamins"
 
 Examples:
 - "2 eggs and 1 cup milk" → LIST
-- "apple, banana, and protein shake" → LIST
-- "toast and orange juice" → LIST
+- "I had pasta and later drank milk" → LIST
+- "apple and protein shake" → LIST
+
+-----------------------------------
+CRITICAL EDGE CASE RULES
+-----------------------------------
+
+1. "AND" RULE (VERY IMPORTANT)
+- Default: treat "and" as SAME DISH
+- ONLY split if strong separation signals exist
+
+2. BREAKFAST PLATES
+- "eggs toast bacon" → SINGLE DISH
+
+3. DRINKS
+- Included in dish if part of meal:
+  "pancakes and coffee" → SINGLE DISH
+- Separate ONLY if clearly independent:
+  "coffee later" → separate
+
+4. "WITH" RULE
+- ALWAYS SINGLE DISH
+- Never split ingredients after "with"
+
+5. "ON THE SIDE"
+- Still SINGLE DISH unless explicitly stated as separate consumption
 
 -----------------------------------
 PARSING RULES
 -----------------------------------
 
 1. QUANTITIES
-- Convert all number words to integers:
+- Convert number words to integers:
   "one" → 1, "two" → 2, "a/an" → 1
-- If quantity is missing, default to 1 ONLY for separate food items
+- If missing, default to 1 ONLY for separate food items
 - DO NOT assign quantity to "dish"
 
 2. UNITS
-- Extract units when explicitly stated:
-  cup, cups, oz, ounces, grams, slices, pieces, bowls, plates, etc.
-- Do NOT invent units
-- Keep unit lowercase and singular if possible
+- Extract only if explicitly stated
+- Keep lowercase and singular
+- Do NOT guess units
 
 3. FOOD NORMALIZATION
-- Use simple, clean food names:
+- Simplify food names:
   "scrambled eggs" → "egg"
   "a glass of milk" → "milk"
-- Remove unnecessary adjectives unless essential
 
-4. DISH PRESERVATION (VERY IMPORTANT)
-- Preserve the FULL dish description including ingredients:
-  "chicken alfredo pasta with mushrooms and onions"
-- Do NOT break it into components
+4. DISH PRESERVATION (EXTREMELY CRITICAL)
+- Preserve FULL phrase:
+  "pasta and salad with chicken and dressing"
+- Do NOT split components
 
-5. IGNORE NON-FOOD CONTENT
-- Ignore filler phrases like:
-  "I had", "for breakfast", "today", etc.
-
-6. STRICT JSON COMPLIANCE
-- No trailing commas
-- Double quotes only
-- Valid JSON format
-
------------------------------------
-EDGE CASE RULES (IMPORTANT)
------------------------------------
-
-- "X with Y" → ALWAYS a SINGLE DISH unless clearly separate
-- "X and Y" → 
-   → If commonly combined meal → SINGLE DISH
-   → If clearly separate → LIST
-
-- Drinks:
-   → Separate if clearly standalone ("coffee and toast")
-   → Included if part of dish context
-
-- Mixed phrases:
-   "I had pasta and also drank milk"
-   → LIST (clearly separate consumption)
+5. IGNORE NON-FOOD TEXT
+- Remove filler phrases:
+  "I had", "for lunch", etc.
 
 -----------------------------------
 FINAL INSTRUCTION
 -----------------------------------
 
-Return ONLY the JSON.
+Return ONLY valid JSON.
 NO explanations.
-NO text outside JSON.
-NO formatting mistakes.
+NO extra text.
+NO formatting errors.
                         """
                 },
                 {"role": "user", "content": prompt}
