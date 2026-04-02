@@ -64,30 +64,126 @@ def safe_groq_call(prompt: str):
             messages=[
                 {
                     "role": "system",
-                    "content":"""
-You are a STRICT food parser.
+                    "content":
+                        """
+                        You are an EXTREMELY STRICT, HIGH-PRECISION food parser.
 
-Return ONLY valid JSON.
+Your job is to convert natural language food descriptions into structured JSON with near-perfect consistency.
 
-TWO possible formats:
+You MUST return ONLY valid JSON. No explanations. No extra text.
 
-1. If the input is a list of separate foods:
+-----------------------------------
+OUTPUT FORMATS (ONLY TWO ALLOWED)
+-----------------------------------
+
+1. MULTIPLE SEPARATE FOODS:
 [
   {"food": "egg", "quantity": 2},
   {"food": "milk", "quantity": 1, "unit": "cup"}
 ]
 
-2. If the input is a SINGLE COMPOSED DISH:
+2. SINGLE COMPOSED DISH:
 {
-  "dish": "chicken alfredo pasta"
+  "dish": "chicken alfredo pasta with mushrooms and onions"
 }
 
-Rules:
-- If foods are combined into one meal (e.g., "chicken alfredo pasta", "burger with fries"), treat as ONE dish
-- If clearly separate items (e.g., "2 eggs and milk"), split them
-- Convert words to numbers
-- Return ONLY JSON
-"""
+-----------------------------------
+CORE DECISION LOGIC (CRITICAL)
+-----------------------------------
+
+A. SINGLE DISH (MOST IMPORTANT RULE)
+If the input describes ONE unified meal, plate, recipe, or menu item → RETURN ONE OBJECT WITH "dish"
+
+This includes:
+- Pasta dishes, bowls, salads, sandwiches, burgers, wraps, pizzas, curries, stir-fries, etc.
+- Any food with toppings, mix-ins, or ingredients
+
+Examples:
+- "chicken alfredo pasta" → SINGLE DISH
+- "burger with fries" → SINGLE DISH (treated as one meal)
+- "salad with chicken, avocado, and dressing" → SINGLE DISH
+- "I had chicken alfredo pasta with mushrooms and onions" → SINGLE DISH
+
+VERY IMPORTANT:
+Ingredients, toppings, or add-ons DO NOT make separate items.
+They stay inside the dish description.
+
+-----------------------------------
+
+B. MULTIPLE FOODS (ONLY WHEN CLEARLY SEPARATE)
+Return a LIST only if items are clearly independent and not part of the same dish.
+
+Indicators of separation:
+- Distinct items eaten separately
+- Explicit enumeration without being one dish
+
+Examples:
+- "2 eggs and 1 cup milk" → LIST
+- "apple, banana, and protein shake" → LIST
+- "toast and orange juice" → LIST
+
+-----------------------------------
+PARSING RULES
+-----------------------------------
+
+1. QUANTITIES
+- Convert all number words to integers:
+  "one" → 1, "two" → 2, "a/an" → 1
+- If quantity is missing, default to 1 ONLY for separate food items
+- DO NOT assign quantity to "dish"
+
+2. UNITS
+- Extract units when explicitly stated:
+  cup, cups, oz, ounces, grams, slices, pieces, bowls, plates, etc.
+- Do NOT invent units
+- Keep unit lowercase and singular if possible
+
+3. FOOD NORMALIZATION
+- Use simple, clean food names:
+  "scrambled eggs" → "egg"
+  "a glass of milk" → "milk"
+- Remove unnecessary adjectives unless essential
+
+4. DISH PRESERVATION (VERY IMPORTANT)
+- Preserve the FULL dish description including ingredients:
+  "chicken alfredo pasta with mushrooms and onions"
+- Do NOT break it into components
+
+5. IGNORE NON-FOOD CONTENT
+- Ignore filler phrases like:
+  "I had", "for breakfast", "today", etc.
+
+6. STRICT JSON COMPLIANCE
+- No trailing commas
+- Double quotes only
+- Valid JSON format
+
+-----------------------------------
+EDGE CASE RULES (IMPORTANT)
+-----------------------------------
+
+- "X with Y" → ALWAYS a SINGLE DISH unless clearly separate
+- "X and Y" → 
+   → If commonly combined meal → SINGLE DISH
+   → If clearly separate → LIST
+
+- Drinks:
+   → Separate if clearly standalone ("coffee and toast")
+   → Included if part of dish context
+
+- Mixed phrases:
+   "I had pasta and also drank milk"
+   → LIST (clearly separate consumption)
+
+-----------------------------------
+FINAL INSTRUCTION
+-----------------------------------
+
+Return ONLY the JSON.
+NO explanations.
+NO text outside JSON.
+NO formatting mistakes.
+                        """
                 },
                 {"role": "user", "content": prompt}
             ],
@@ -188,7 +284,7 @@ async def fetch_usda(food_name: str):
             "Protein": "protein_g",
             "Carbohydrate, by difference": "carbs_g",
             "Total lipid (fat)": "fat_g",
-            "Sugars, total including NLEA": "sugar_g",
+            "Total Sugars including NLEA": "sugar_g",
             "Fiber, total dietary": "fiber_g",
             "Vitamin D (D2 + D3)": "vitamin_d_mcg",
         }
@@ -200,7 +296,6 @@ async def fetch_usda(food_name: str):
                 nutrition_data[nutrient_lookup[name]] = nutrient.get("value", 0)
 
         # ------------------ SERVING NORMALIZATION ------------------
-        desc = selected_food.get("description", "").lower()
         if "egg" in food_name.lower():
             # USDA often returns per 100g; 1 egg ≈ 50g
             for k in nutrition_data:
@@ -214,7 +309,6 @@ async def fetch_usda(food_name: str):
 
 
 # ------------------ MAIN ENDPOINT ------------------
-
 @app.get("/foods/search", response_class=HTMLResponse)
 async def usda_api(request: Request, query: str):
     query = clean_voice_input(query)
