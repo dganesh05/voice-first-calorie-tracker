@@ -17,6 +17,11 @@ for update
 using (auth.uid() = id)
 with check (auth.uid() = id);
 
+drop policy if exists users_insert_own on public.users;
+create policy users_insert_own on public.users
+for insert
+with check (auth.uid() = id);
+
 drop policy if exists personal_foods_select_own on public.personal_foods;
 create policy personal_foods_select_own on public.personal_foods
 for select

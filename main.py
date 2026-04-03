@@ -6,12 +6,12 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from pydantic import BaseModel
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.templating import Jinja2Templates
 
-from supabase_client import supabase
+from supabase_client import auth_supabase, supabase
 from food_resolver import resolve_food_item
 from llm_parser import parse_raw_transcript
 from transcript_parser import parse_text_transcript
@@ -20,6 +20,7 @@ app = FastAPI()
 
 templates = Jinja2Templates(directory="templates")
 security = HTTPBearer(auto_error=False)
+AUTH_COOKIE_NAME = "vocalorie_access_token"
 
 
 def _has_usable_usda_key() -> bool:
@@ -33,6 +34,13 @@ def _has_usable_usda_key() -> bool:
         "changeme",
     }
     return key.lower() not in placeholders
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
 
 
 class FoodProcessRequest(BaseModel):
@@ -100,46 +108,131 @@ def _session_token_from_auth_response(response_obj) -> str | None:
     return str(getattr(session, "access_token", "") or "").strip() or None
 
 
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=_env_flag("COOKIE_SECURE", default=False),
+        samesite="lax",
+        max_age=60 * 60 * 24 * 7,
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+
+
+def _get_request_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+) -> str | None:
+    if credentials and credentials.credentials:
+        return credentials.credentials
+    cookie_token = str(request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
+    return cookie_token or None
+
+
+def _resolve_user_id_from_token(token: str) -> str | None:
+    try:
+        auth_response = auth_supabase.auth.get_user(token)
+    except Exception:
+        return None
+    return _user_id_from_auth_response(auth_response)
+
+
+def _resolve_optional_user_id(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = None,
+) -> str | None:
+    token = _get_request_token(request, credentials)
+    if not token:
+        return None
+    return _resolve_user_id_from_token(token)
+
+
+def _ensure_user_profile(
+    user_id: str,
+    email: str,
+    display_name: str | None = None,
+    daily_calorie_goal: float | None = None,
+) -> None:
+    # Upsert base row first so auth user always has an app profile row.
+    supabase.table("users").upsert(
+        {
+            "id": user_id,
+            "email": email,
+        }
+    ).execute()
+
+    updates = {}
+    if display_name is not None:
+        updates["display_name"] = display_name
+    if daily_calorie_goal is not None:
+        updates["daily_calorie_goal"] = daily_calorie_goal
+
+    if updates:
+        supabase.table("users").update(updates).eq("id", user_id).execute()
+
+
 def get_current_user_id(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> str:
-    if not credentials or not credentials.credentials:
+    token = _get_request_token(request, credentials)
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing bearer token",
+            detail="Authentication required",
         )
 
-    try:
-        auth_response = supabase.auth.get_user(credentials.credentials)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {exc}",
-        ) from exc
-
-    user_id = _user_id_from_auth_response(auth_response)
+    user_id = _resolve_user_id_from_token(token)
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unable to resolve user from token",
+            detail="Invalid or expired session",
         )
     return user_id
 
 
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
+async def home(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
+    user_id = _resolve_optional_user_id(request, credentials)
+    if not user_id:
+        return templates.TemplateResponse(request, "auth.html")
     return templates.TemplateResponse(request, "front_end.html")
 
 
 @app.get("/log", response_class=HTMLResponse)
-async def log_page(request: Request):
+async def log_page(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
+    user_id = _resolve_optional_user_id(request, credentials)
+    if not user_id:
+        return templates.TemplateResponse(request, "auth.html")
     return templates.TemplateResponse(request, "front_end.html")
 
 
+@app.get("/auth", response_class=HTMLResponse)
+async def auth_page(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
+    user_id = _resolve_optional_user_id(request, credentials)
+    if user_id:
+        return templates.TemplateResponse(request, "front_end.html")
+    return templates.TemplateResponse(request, "auth.html")
+
+
 @app.post("/register")
-async def register(payload: RegisterRequest):
+async def register(payload: RegisterRequest, response: Response):
     try:
-        auth_response = supabase.auth.sign_up(
+        auth_response = auth_supabase.auth.sign_up(
             {
                 "email": payload.email,
                 "password": payload.password,
@@ -152,31 +245,34 @@ async def register(payload: RegisterRequest):
     if not user_id:
         raise HTTPException(status_code=400, detail="Supabase did not return a user id")
 
-    # Keep profile metadata in app-level users table for journal math.
     try:
-        supabase.table("users").upsert(
-            {
-                "id": user_id,
-                "email": payload.email,
-                "display_name": payload.display_name,
-                "daily_calorie_goal": payload.daily_calorie_goal,
-            }
-        ).execute()
-    except Exception:
-        # Auth account can exist even if profile row write fails.
-        pass
+        _ensure_user_profile(
+            user_id=user_id,
+            email=payload.email,
+            display_name=payload.display_name,
+            daily_calorie_goal=payload.daily_calorie_goal,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Account created but profile setup failed: {exc}",
+        ) from exc
+
+    access_token = _session_token_from_auth_response(auth_response)
+    if access_token:
+        _set_auth_cookie(response, access_token)
 
     return {
         "status": "success",
         "user_id": user_id,
-        "access_token": _session_token_from_auth_response(auth_response),
+        "access_token": access_token,
     }
 
 
 @app.post("/login")
-async def login(payload: LoginRequest):
+async def login(payload: LoginRequest, response: Response):
     try:
-        auth_response = supabase.auth.sign_in_with_password(
+        auth_response = auth_supabase.auth.sign_in_with_password(
             {
                 "email": payload.email,
                 "password": payload.password,
@@ -190,11 +286,27 @@ async def login(payload: LoginRequest):
     if not user_id or not token:
         raise HTTPException(status_code=401, detail="Login did not return a valid session")
 
+    try:
+        _ensure_user_profile(user_id=user_id, email=payload.email)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Login succeeded but profile setup failed: {exc}",
+        ) from exc
+
+    _set_auth_cookie(response, token)
+
     return {
         "status": "success",
         "user_id": user_id,
         "access_token": token,
     }
+
+
+@app.post("/logout")
+async def logout(response: Response):
+    _clear_auth_cookie(response)
+    return {"status": "success"}
 
 
 @app.get("/health/supabase")
@@ -232,7 +344,11 @@ async def health_supabase():
 
 
 @app.get("/foods/search", response_class=HTMLResponse)
-async def usda_api(request: Request, query: str, user_id: str = "anonymous"):
+async def usda_api(
+    request: Request,
+    query: str,
+    user_id: str = Depends(get_current_user_id),
+):
     parsed_items = parse_text_transcript(query)
 
     results = []

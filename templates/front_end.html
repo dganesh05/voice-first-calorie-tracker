@@ -247,16 +247,16 @@
 
     <section class="panel top-controls">
         <div>
-            <label for="token">Bearer token (from login)</label>
-            <input id="token" placeholder="Paste JWT access token" autocomplete="off">
-        </div>
-        <div>
             <label for="transcript">Meal transcript (text-first)</label>
             <textarea id="transcript" placeholder="Example: I had two eggs and one toast"></textarea>
         </div>
         <div class="inline-grid">
             <button id="resolveBtn" class="btn-primary">Resolve Meal</button>
             <button id="clearBtn" class="btn-warm">Clear</button>
+        </div>
+        <div class="inline-grid">
+            <button id="journalBtn" class="btn-secondary">View Journal JSON</button>
+            <button id="logoutBtn" class="btn-warm">Log Out</button>
         </div>
         <p class="hint">Each parsed item becomes one staging card. Log it directly or create a personal meal and auto-log.</p>
         <div id="status" class="status"></div>
@@ -274,15 +274,15 @@
 </div>
 
 <script>
-    const tokenInput = document.getElementById("token");
     const transcriptInput = document.getElementById("transcript");
     const resolveBtn = document.getElementById("resolveBtn");
     const clearBtn = document.getElementById("clearBtn");
+    const journalBtn = document.getElementById("journalBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
     const statusEl = document.getElementById("status");
     const cardsEl = document.getElementById("cards");
     const totalsEl = document.getElementById("totals");
 
-    const STORAGE_KEY = "vocalorie_access_token";
     const state = {
         items: [],
         totals: { calories: 0, protein: 0, carbs: 0, fat: 0 }
@@ -296,17 +296,6 @@
     function setStatus(message, type = "") {
         statusEl.textContent = message;
         statusEl.className = `status ${type}`;
-    }
-
-    function authHeaders() {
-        const token = tokenInput.value.trim();
-        if (!token) {
-            throw new Error("Missing bearer token. Please paste your access token.");
-        }
-        return {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-        };
     }
 
     function readEditorValues(item) {
@@ -360,7 +349,7 @@
         try {
             const payload = await apiFetch("/foods/process", {
                 method: "POST",
-                headers: authHeaders(),
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ raw_transcript: transcript })
             });
 
@@ -388,7 +377,7 @@
         try {
             await apiFetch("/foods/confirm", {
                 method: "POST",
-                headers: authHeaders(),
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     items: [
                         {
@@ -424,7 +413,7 @@
 
             await apiFetch("/foods/manual", {
                 method: "POST",
-                headers: authHeaders(),
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     food_name: values.name,
                     calories: values.calories,
@@ -437,7 +426,7 @@
 
             await apiFetch("/foods/confirm", {
                 method: "POST",
-                headers: authHeaders(),
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     items: [
                         {
@@ -536,13 +525,34 @@
         render();
     }
 
-    tokenInput.value = localStorage.getItem(STORAGE_KEY) || "";
-    tokenInput.addEventListener("input", () => {
-        localStorage.setItem(STORAGE_KEY, tokenInput.value.trim());
-    });
+    async function openJournal() {
+        try {
+            const payload = await apiFetch("/journal");
+            const w = window.open("", "_blank");
+            if (w) {
+                w.document.write(`<pre>${JSON.stringify(payload, null, 2)}</pre>`);
+            }
+        } catch (error) {
+            setStatus(error.message || "Failed to load journal.", "error");
+        }
+    }
+
+    async function logout() {
+        try {
+            await apiFetch("/logout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" }
+            });
+            window.location.href = "/auth";
+        } catch (error) {
+            setStatus(error.message || "Failed to log out.", "error");
+        }
+    }
 
     resolveBtn.addEventListener("click", resolveMeal);
     clearBtn.addEventListener("click", clearAll);
+    journalBtn.addEventListener("click", openJournal);
+    logoutBtn.addEventListener("click", logout);
 
     render();
 </script>

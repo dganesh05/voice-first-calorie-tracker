@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Vocalorie Auth</title>
+    <style>
+        :root {
+            --bg: #f8f4ea;
+            --panel: #fffdf8;
+            --ink: #1f2933;
+            --accent: #0f766e;
+            --accent-alt: #b45309;
+            --muted: #52606d;
+            --danger: #b91c1c;
+            --line: #d9d0bd;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Avenir Next", "Nunito Sans", "Segoe UI", sans-serif;
+            margin: 0;
+            min-height: 100vh;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at top right, #f5e8c9, transparent 40%),
+                radial-gradient(circle at bottom left, #d6f0e8, transparent 45%),
+                var(--bg);
+            display: grid;
+            place-items: center;
+            padding: 16px;
+        }
+
+        .card {
+            width: min(680px, 100%);
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            box-shadow: 0 12px 30px rgba(31, 41, 51, 0.08);
+            padding: 20px;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: clamp(1.8rem, 2.8vw, 2.4rem);
+        }
+
+        p {
+            color: var(--muted);
+            margin: 0 0 16px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 12px;
+            background: #fff;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--muted);
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+
+        input {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            padding: 10px;
+            font-size: 0.95rem;
+            margin-bottom: 8px;
+        }
+
+        button {
+            border: none;
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #f3fffd;
+        }
+
+        .btn-warm {
+            background: var(--accent-alt);
+            color: #fff7ed;
+        }
+
+        .status {
+            min-height: 1.2rem;
+            margin-top: 12px;
+            font-weight: 700;
+        }
+
+        .status.error {
+            color: var(--danger);
+        }
+
+        .status.ok {
+            color: #065f46;
+        }
+
+        @media (max-width: 740px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <h1>Vocalorie</h1>
+        <p>Create an account or sign in to access your logger, journal, and profile data.</p>
+
+        <section class="grid">
+            <form id="loginForm" class="panel">
+                <h2>Sign In</h2>
+                <label for="loginEmail">Email</label>
+                <input id="loginEmail" type="email" required autocomplete="email">
+                <label for="loginPassword">Password</label>
+                <input id="loginPassword" type="password" required autocomplete="current-password">
+                <button class="btn-primary" type="submit">Sign In</button>
+            </form>
+
+            <form id="registerForm" class="panel">
+                <h2>Create Account</h2>
+                <label for="registerName">Display name</label>
+                <input id="registerName" type="text" placeholder="Optional" autocomplete="name">
+                <label for="registerEmail">Email</label>
+                <input id="registerEmail" type="email" required autocomplete="email">
+                <label for="registerPassword">Password</label>
+                <input id="registerPassword" type="password" required autocomplete="new-password">
+                <label for="registerGoal">Daily calorie goal</label>
+                <input id="registerGoal" type="number" min="500" step="1" value="2000">
+                <button class="btn-warm" type="submit">Create Account</button>
+            </form>
+        </section>
+
+        <div id="status" class="status"></div>
+    </main>
+
+    <script>
+        const loginForm = document.getElementById("loginForm");
+        const registerForm = document.getElementById("registerForm");
+        const statusEl = document.getElementById("status");
+
+        function setStatus(message, type = "") {
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+
+        async function apiFetch(path, options = {}) {
+            const response = await fetch(path, options);
+            let payload = {};
+            try {
+                payload = await response.json();
+            } catch {
+                payload = {};
+            }
+            if (!response.ok) {
+                throw new Error(payload.detail || "Request failed");
+            }
+            return payload;
+        }
+
+        loginForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            setStatus("Signing in...");
+
+            try {
+                await apiFetch("/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        email: document.getElementById("loginEmail").value.trim(),
+                        password: document.getElementById("loginPassword").value
+                    })
+                });
+                setStatus("Signed in. Redirecting...", "ok");
+                window.location.href = "/log";
+            } catch (error) {
+                setStatus(error.message || "Sign in failed.", "error");
+            }
+        });
+
+        registerForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            setStatus("Creating account...");
+
+            const rawGoal = Number(document.getElementById("registerGoal").value || 2000);
+            const dailyGoal = Number.isFinite(rawGoal) ? rawGoal : 2000;
+
+            try {
+                await apiFetch("/register", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        email: document.getElementById("registerEmail").value.trim(),
+                        password: document.getElementById("registerPassword").value,
+                        display_name: document.getElementById("registerName").value.trim() || null,
+                        daily_calorie_goal: dailyGoal
+                    })
+                });
+                setStatus("Account created. Redirecting...", "ok");
+                window.location.href = "/log";
+            } catch (error) {
+                setStatus(error.message || "Registration failed.", "error");
+            }
+        });
+    </script>
+</body>
+</html>
