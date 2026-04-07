@@ -14,6 +14,13 @@ load_dotenv(override=True)
 USDA_API_KEY = os.getenv("USDA_API_KEY")
 
 
+def _log_resolution_step(message: str, **details: Any) -> None:
+    if details:
+        print(f"[food_resolver] {message} | {details}")
+        return
+    print(f"[food_resolver] {message}")
+
+
 def _has_usable_usda_key() -> bool:
     key = str(USDA_API_KEY or "").strip()
     if not key:
@@ -50,6 +57,18 @@ def _collect_lookup_terms(food_item: str) -> list[str]:
     if canonical and canonical not in terms:
         terms.insert(0, canonical)
     return terms[:4]
+
+
+def _merge_lookup_terms(*queries: str | None) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        for term in _collect_lookup_terms(str(query or "")):
+            if term in seen:
+                continue
+            seen.add(term)
+            merged.append(term)
+    return merged[:8]
 
 
 def _normalize_food_record(record: dict, fallback_name: str) -> dict:
@@ -186,9 +205,17 @@ async def fetch_from_usda(
     descriptors: list[str] | None = None,
 ):
     if not _has_usable_usda_key():
+        _log_resolution_step("USDA lookup skipped", reason="missing or placeholder USDA_API_KEY")
         return None
 
     query_text = str(search_query or food_item or "").strip() or food_item
+    _log_resolution_step(
+        "USDA lookup started",
+        food_item=food_item,
+        query=query_text,
+        brand=brand,
+        descriptors=descriptors or [],
+    )
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -207,14 +234,25 @@ async def fetch_from_usda(
         )
 
         if response.status_code != 200:
+            _log_resolution_step(
+                "USDA lookup failed",
+                status_code=response.status_code,
+                response_text=(response.text or "").strip()[:300],
+            )
             return None
 
         foods = response.json().get("foods") or []
         food = _pick_usda_food(food_item, foods, brand=brand, descriptors=descriptors)
         if not food:
+            _log_resolution_step("USDA lookup skipped", reason="no suitable USDA candidate selected")
             return None
 
         category = food.get("dataType") or food.get("foodCategory") or "USDA"
+        _log_resolution_step(
+            "USDA lookup matched",
+            food_name=food.get("description") or food_item,
+            category=category,
+        )
 
         return {
             "food_name": food.get("description") or food_item,
@@ -268,9 +306,10 @@ def _lookup_personal_food(
     user_id: str,
     descriptors: list[str] | None = None,
     brand: str | None = None,
+    fallback_search_query: str | None = None,
 ):
     normalized = _normalize_query(food_item)
-    terms = _collect_lookup_terms(food_item)
+    terms = _merge_lookup_terms(food_item, fallback_search_query)
     try:
         candidates: list[dict] = []
         seen_ids: set[str] = set()
@@ -323,9 +362,10 @@ def _lookup_global_food(
     food_item: str,
     descriptors: list[str] | None = None,
     brand: str | None = None,
+    fallback_search_query: str | None = None,
 ):
     normalized = _normalize_query(food_item)
-    terms = _collect_lookup_terms(food_item)
+    terms = _merge_lookup_terms(food_item, fallback_search_query)
     try:
         candidates: list[dict] = []
         seen_ids: set[str] = set()
@@ -381,28 +421,60 @@ async def resolve_food_item(
 ):
     normalized_food_item = _normalize_query(food_item)
     if not normalized_food_item:
+        _log_resolution_step("Resolution skipped", reason="empty food item")
         return None
 
+    _log_resolution_step(
+        "Resolution started",
+        food_item=normalized_food_item,
+        user_id=user_id,
+        descriptors=descriptors or [],
+        brand=brand,
+        fallback_search_query=fallback_search_query,
+    )
+
     # 1. Check Personal DB First
+    _log_resolution_step("Tier 1 lookup started", tier="personal_foods")
     personal_match = _lookup_personal_food(
         normalized_food_item,
         user_id,
         descriptors=descriptors,
         brand=brand,
+        fallback_search_query=fallback_search_query,
     )
     if personal_match:
+        _log_resolution_step(
+            "Tier 1 lookup matched",
+            tier="personal_foods",
+            food_name=personal_match.get("food_name") or normalized_food_item,
+        )
+        _log_resolution_step("Tier 2 lookup skipped", tier="global_foods", reason="personal match found")
+        _log_resolution_step("Tier 3 lookup skipped", tier="USDA", reason="personal match found")
         return _normalize_food_record(personal_match, normalized_food_item)
 
+    _log_resolution_step("Tier 1 lookup missed", tier="personal_foods")
+
     # 2. Check shared global cache
+    _log_resolution_step("Tier 2 lookup started", tier="global_foods")
     cache_match = _lookup_global_food(
         normalized_food_item,
         descriptors=descriptors,
         brand=brand,
+        fallback_search_query=fallback_search_query,
     )
     if cache_match:
+        _log_resolution_step(
+            "Tier 2 lookup matched",
+            tier="global_foods",
+            food_name=cache_match.get("food_name") or normalized_food_item,
+        )
+        _log_resolution_step("Tier 3 lookup skipped", tier="USDA", reason="global cache match found")
         return _normalize_food_record(cache_match, normalized_food_item)
 
+    _log_resolution_step("Tier 2 lookup missed", tier="global_foods")
+
     # 3. Fallback to USDA API
+    _log_resolution_step("Tier 3 lookup started", tier="USDA")
     usda_data = await fetch_from_usda(
         normalized_food_item,
         search_query=fallback_search_query,
@@ -423,9 +495,20 @@ async def resolve_food_item(
         }
         try:
             supabase.table("global_foods").insert(cache_record).execute()
+            _log_resolution_step(
+                "USDA cache insert completed",
+                table="global_foods",
+                food_name=cache_record.get("food_name"),
+            )
         except Exception:
             # Cache writes should never fail the user-facing lookup.
+            _log_resolution_step(
+                "USDA cache insert skipped",
+                table="global_foods",
+                reason="write failure or missing table",
+            )
             pass
         return _normalize_food_record(usda_data, normalized_food_item)
 
+    _log_resolution_step("Tier 3 lookup missed", tier="USDA")
     return None  # Food not found anywhere

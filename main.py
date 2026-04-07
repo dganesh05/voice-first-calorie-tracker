@@ -2,10 +2,12 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 import os
+import tempfile
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from pydantic import BaseModel
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -30,6 +32,19 @@ def _has_usable_usda_key() -> bool:
     placeholders = {
         "your-usda-api-key",
         "your_usda_api_key",
+        "replace-me",
+        "changeme",
+    }
+    return key.lower() not in placeholders
+
+
+def _has_usable_groq_key() -> bool:
+    key = str(os.getenv("GROQ_API_KEY") or "").strip()
+    if not key:
+        return False
+    placeholders = {
+        "your-groq-api-key",
+        "your_groq_api_key",
         "replace-me",
         "changeme",
     }
@@ -409,7 +424,27 @@ async def usda_api(
 
 async def _process_food_pipeline(raw_transcript: str, user_id: str):
     # 1. Standardize free-form transcript into strict JSON array.
-    parsed_items = await parse_raw_transcript(raw_transcript)
+    try:
+        parsed_items = await parse_raw_transcript(raw_transcript)
+    except Exception:
+        # Keep resolver deterministic by converting fallback parser output
+        # into the same canonical item shape expected by the pipeline.
+        parsed_items = []
+        fallback_items = parse_text_transcript(raw_transcript)
+        for item in fallback_items:
+            food_name = str(item.get("food_name") or "").strip()
+            if not food_name:
+                continue
+            parsed_items.append(
+                {
+                    "quantity": item.get("quantity", 1),
+                    "unit": item.get("unit") or "serving",
+                    "food_name": food_name,
+                    "descriptors": [],
+                    "brand": None,
+                    "fallback_search_query": item.get("lookup_query") or food_name,
+                }
+            )
 
     results = []
     staged_items = []
@@ -512,6 +547,63 @@ async def process_voice_log_post(
         raw_transcript=payload.raw_transcript,
         user_id=user_id,
     )
+
+
+@app.post("/transcribe")
+async def transcribe_audio(request: Request):
+    if not _has_usable_groq_key():
+        raise HTTPException(status_code=400, detail="Missing GROQ_API_KEY in environment")
+
+    audio_bytes = await request.body()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="No audio bytes received")
+
+    content_type = str(request.headers.get("content-type") or "audio/webm").lower()
+
+    suffix = ".webm"
+    if "wav" in content_type:
+        suffix = ".wav"
+    elif "ogg" in content_type:
+        suffix = ".ogg"
+    elif "mpeg" in content_type or "mp3" in content_type:
+        suffix = ".mp3"
+    elif "mp4" in content_type or "m4a" in content_type:
+        suffix = ".m4a"
+
+    groq_api_key = str(os.getenv("GROQ_API_KEY") or "").strip()
+    async with httpx.AsyncClient(timeout=60) as client:
+        with tempfile.NamedTemporaryFile(suffix=suffix) as temp_audio:
+            temp_audio.write(audio_bytes)
+            temp_audio.flush()
+            with open(temp_audio.name, "rb") as audio_file:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {groq_api_key}"},
+                    files={"file": (f"recording{suffix}", audio_file, content_type)},
+                    data={
+                        "model": "whisper-large-v3-turbo",
+                        "response_format": "text",
+                        "temperature": "0",
+                        "language": "en",
+                    },
+                )
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Transcription service rejected the upload: {response.text.strip() or response.reason_phrase}",
+        )
+
+    transcript_text = str(response.text or "").strip()
+    if not transcript_text:
+        raise HTTPException(status_code=502, detail="Transcription service returned empty text")
+
+    return {"transcript": transcript_text}
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/foods/confirm")

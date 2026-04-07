@@ -94,6 +94,47 @@ Exit behavior:
 - exit code 0: all checks passed
 - exit code 1: one or more checks failed
 
+## 4.2 Parser Normalization Matrix Script
+
+Script path:
+
+- scripts/parser_matrix_test.py
+
+Run from project root:
+
+python scripts/parser_matrix_test.py
+
+Expected:
+
+- Prints PASS with assertion count
+- Exit code 0 when all normalization checks pass
+- Non-zero exit code with a detailed case diff on first failure
+
+Current matrix coverage (16 checks):
+
+1. i had two eggs and a glass of whole milk
+2. 3 pieces of toast
+3. 1 slice of pizza
+4. 2x banana
+5. i just ate one bowl of chicken noodle soup
+6. 2% greek yogurt
+7. oreo, chips; and salsa
+8. an apple and a banana
+9. i had 4 oz chicken breast
+10. 2 glasses of orange juice
+11. LLM normalization: piece of toast -> unit piece + food toast
+12. LLM fallback query punctuation cleanup and sanitizer checks
+13. LLM source expansion: toast -> includes bread in fallback query
+14. LLM source expansion: omelette -> includes egg in fallback query
+15. LLM alias canonicalization: omlette -> omelette
+16. LLM compound split: avocado toast -> avocado + toast
+
+Why this exists:
+
+- Protects punctuation cleanup rules from regression
+- Protects unit extraction so cases like piece of toast stay distinguishable
+- Protects USDA-oriented lookup query normalization
+
 ## 5. API Test Runbook (Current)
 
 Use a second terminal while backend runs.

@@ -117,6 +117,11 @@
             color: #f0fdfa;
         }
 
+        .btn-danger {
+            background: #b91c1c;
+            color: #fff5f5;
+        }
+
         .btn-warm {
             background: var(--accent-alt);
             color: #fff7ed;
@@ -251,6 +256,10 @@
             <textarea id="transcript" placeholder="Example: I had two eggs and one toast"></textarea>
         </div>
         <div class="inline-grid">
+            <button id="startMicBtn" class="btn-secondary">Start Recording</button>
+            <button id="stopMicBtn" class="btn-danger" disabled>Stop Recording</button>
+        </div>
+        <div class="inline-grid">
             <button id="resolveBtn" class="btn-primary">Resolve Meal</button>
             <button id="clearBtn" class="btn-warm">Clear</button>
         </div>
@@ -275,6 +284,8 @@
 
 <script>
     const transcriptInput = document.getElementById("transcript");
+    const startMicBtn = document.getElementById("startMicBtn");
+    const stopMicBtn = document.getElementById("stopMicBtn");
     const resolveBtn = document.getElementById("resolveBtn");
     const clearBtn = document.getElementById("clearBtn");
     const journalBtn = document.getElementById("journalBtn");
@@ -287,6 +298,270 @@
         items: [],
         totals: { calories: 0, protein: 0, carbs: 0, fat: 0 }
     };
+
+    let recognition = null;
+    let speechSupported = false;
+    let isRecording = false;
+    let recorder = null;
+    let recordingStream = null;
+    let recordingChunks = [];
+
+    function speechApi() {
+        return window.SpeechRecognition || window.webkitSpeechRecognition;
+    }
+
+    function browserName() {
+        const ua = navigator.userAgent;
+        if (ua.includes("Firefox")) {
+            return "Firefox";
+        }
+        if (ua.includes("Edg/")) {
+            return "Edge";
+        }
+        if (ua.includes("Chrome")) {
+            return "Chrome";
+        }
+        return "Unknown";
+    }
+
+    function speechBlockedReason() {
+        const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+        if (!window.isSecureContext && !isLocalhost) {
+            return "Speech input requires HTTPS or localhost. Open this app on localhost or secure origin.";
+        }
+        return "";
+    }
+
+    async function requestMicAccess() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error("Microphone API is unavailable in this browser.");
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+    }
+
+    function mediaRecorderMimeType() {
+        const candidates = [
+            "audio/webm;codecs=opus",
+            "audio/webm",
+            "audio/ogg;codecs=opus",
+            "audio/ogg"
+        ];
+
+        if (!window.MediaRecorder) {
+            return "";
+        }
+
+        return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) || "";
+    }
+
+    function speechErrorMessage(errorCode) {
+        if (errorCode === "not-allowed" || errorCode === "service-not-allowed") {
+            return "Microphone permission denied. Allow mic access in browser site settings.";
+        }
+        if (errorCode === "audio-capture") {
+            return "No microphone was found. Check your input device and OS microphone settings.";
+        }
+        if (errorCode === "network") {
+            return "Speech service network error. Check internet connection and try again.";
+        }
+        if (errorCode === "aborted") {
+            return "Recording was interrupted. Try starting again.";
+        }
+        return `Speech error: ${errorCode || "unknown"}`;
+    }
+
+    function configureSpeech() {
+        const SpeechRecognition = speechApi();
+        speechSupported = Boolean(SpeechRecognition);
+        const blockedReason = speechBlockedReason();
+        const canRecordAudio = Boolean(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+        if (blockedReason) {
+            startMicBtn.disabled = true;
+            stopMicBtn.disabled = true;
+            const message = blockedReason || "Speech input is not available in this browser. Use text input.";
+            setStatus(message, "");
+            return;
+        }
+
+        if (speechSupported) {
+            recognition = new SpeechRecognition();
+            recognition.lang = "en-US";
+            recognition.interimResults = true;
+            recognition.continuous = true;
+
+            recognition.onstart = () => {
+                isRecording = true;
+                startMicBtn.disabled = true;
+                stopMicBtn.disabled = false;
+                setStatus("Listening...", "");
+            };
+
+            recognition.onresult = (event) => {
+                const parts = [];
+                for (let i = 0; i < event.results.length; i += 1) {
+                    parts.push(event.results[i][0].transcript);
+                }
+                transcriptInput.value = parts.join(" ").trim();
+                setStatus("Listening... transcript is updating.", "");
+            };
+
+            recognition.onerror = (event) => {
+                isRecording = false;
+                setStatus(speechErrorMessage(event.error), "error");
+                startMicBtn.disabled = false;
+                stopMicBtn.disabled = true;
+            };
+
+            recognition.onend = () => {
+                isRecording = false;
+                startMicBtn.disabled = false;
+                stopMicBtn.disabled = true;
+                if (transcriptInput.value.trim()) {
+                    setStatus("Recording stopped. Review transcript and press Resolve Meal.", "ok");
+                } else {
+                    setStatus("No speech detected. Try again.", "error");
+                }
+            };
+            return;
+        }
+
+        if (canRecordAudio) {
+            startMicBtn.disabled = false;
+            stopMicBtn.disabled = true;
+            setStatus(`${browserName()} does not support live speech recognition here. Start Recording will capture audio and transcribe it after you stop.`, "ok");
+            return;
+        }
+
+        startMicBtn.disabled = true;
+        stopMicBtn.disabled = true;
+        setStatus("Speech input is not available in this browser. Use text input.", "");
+    }
+
+    async function startRecording() {
+        if (isRecording) {
+            setStatus("Recording is already running.", "");
+            return;
+        }
+
+        if (speechSupported && recognition) {
+            try {
+                startMicBtn.disabled = true;
+                stopMicBtn.disabled = false;
+                await requestMicAccess();
+                setStatus("Starting microphone...", "");
+                recognition.start();
+            } catch (error) {
+                isRecording = false;
+                startMicBtn.disabled = false;
+                stopMicBtn.disabled = true;
+                const message = error && error.name === "NotAllowedError"
+                    ? "Microphone permission denied. Allow mic access and try again."
+                    : "Could not start recording. Try again.";
+                setStatus(message, "error");
+            }
+            return;
+        }
+
+        if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            setStatus("Speech input is not available in this browser.", "error");
+            return;
+        }
+
+        try {
+            recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mimeType = mediaRecorderMimeType();
+
+            recordingChunks = [];
+            recorder = mimeType ? new MediaRecorder(recordingStream, { mimeType }) : new MediaRecorder(recordingStream);
+            recorder.ondataavailable = (event) => {
+                if (event.data && event.data.size > 0) {
+                    recordingChunks.push(event.data);
+                }
+            };
+            recorder.onerror = (event) => {
+                isRecording = false;
+                startMicBtn.disabled = false;
+                stopMicBtn.disabled = true;
+                setStatus(`Recording error: ${event.error?.name || "unknown"}`, "error");
+                if (recordingStream) {
+                    recordingStream.getTracks().forEach((track) => track.stop());
+                    recordingStream = null;
+                }
+                recorder = null;
+            };
+            recorder.onstop = async () => {
+                isRecording = false;
+                startMicBtn.disabled = false;
+                stopMicBtn.disabled = true;
+
+                if (recordingStream) {
+                    recordingStream.getTracks().forEach((track) => track.stop());
+                    recordingStream = null;
+                }
+
+                const finalRecorder = recorder;
+                recorder = null;
+
+                if (!recordingChunks.length) {
+                    setStatus("No speech detected. Try again.", "error");
+                    recordingChunks = [];
+                    return;
+                }
+
+                const blob = new Blob(recordingChunks, { type: finalRecorder?.mimeType || mimeType || "audio/webm" });
+                recordingChunks = [];
+
+                try {
+                    setStatus("Transcribing audio...", "");
+                    const transcript = await transcribeAudio(blob);
+                    if (transcript) {
+                        transcriptInput.value = transcript;
+                        setStatus("Recording stopped. Review transcript and press Resolve Meal.", "ok");
+                    } else {
+                        setStatus("No speech detected. Try again.", "error");
+                    }
+                } catch (error) {
+                    setStatus(error.message || "Failed to transcribe recording.", "error");
+                }
+            };
+
+            startMicBtn.disabled = true;
+            stopMicBtn.disabled = false;
+            isRecording = true;
+            setStatus("Recording audio...", "");
+            recorder.start();
+        } catch (error) {
+            isRecording = false;
+            startMicBtn.disabled = false;
+            stopMicBtn.disabled = true;
+            const message = error && error.name === "NotAllowedError"
+                ? "Microphone permission denied. Allow mic access and try again."
+                : "Could not start recording. Try again.";
+            setStatus(message, "error");
+        }
+    }
+
+    function stopRecording() {
+        if (speechSupported && recognition) {
+            if (!isRecording) {
+                return;
+            }
+            stopMicBtn.disabled = true;
+            setStatus("Stopping recording...", "");
+            recognition.stop();
+            return;
+        }
+
+        if (!recorder || !isRecording) {
+            return;
+        }
+        stopMicBtn.disabled = true;
+        setStatus("Stopping recording...", "");
+        recorder.stop();
+    }
 
     function fmt(value) {
         const n = Number(value || 0);
@@ -372,6 +647,9 @@
 
     async function logItem(item) {
         const button = document.querySelector(`[data-log='${item.client_item_id}']`);
+        if (!button) {
+            return;
+        }
         button.disabled = true;
 
         try {
@@ -401,11 +679,16 @@
 
     function toggleEditor(itemId) {
         const editor = document.querySelector(`[data-editor='${itemId}']`);
-        editor.classList.toggle("open");
+        if (editor) {
+            editor.classList.toggle("open");
+        }
     }
 
     async function createAndLog(item) {
         const saveBtn = document.querySelector(`[data-save='${item.client_item_id}']`);
+        if (!saveBtn) {
+            return;
+        }
         saveBtn.disabled = true;
 
         try {
@@ -447,6 +730,29 @@
         } finally {
             saveBtn.disabled = false;
         }
+    }
+
+    async function transcribeAudio(blob) {
+        const response = await fetch("/transcribe", {
+            method: "POST",
+            headers: {
+                "Content-Type": blob.type || "audio/webm"
+            },
+            body: blob
+        });
+
+        let payload = {};
+        try {
+            payload = await response.json();
+        } catch {
+            payload = {};
+        }
+
+        if (!response.ok) {
+            throw new Error(payload.detail || "Failed to transcribe recording.");
+        }
+
+        return String(payload.transcript || "").trim();
     }
 
     function cardTemplate(item) {
@@ -550,10 +856,13 @@
     }
 
     resolveBtn.addEventListener("click", resolveMeal);
+    startMicBtn.addEventListener("click", startRecording);
+    stopMicBtn.addEventListener("click", stopRecording);
     clearBtn.addEventListener("click", clearAll);
     journalBtn.addEventListener("click", openJournal);
     logoutBtn.addEventListener("click", logout);
 
+    configureSpeech();
     render();
 </script>
 

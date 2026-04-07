@@ -29,6 +29,26 @@ FILLER_PHRASES = [
 
 ARTICLES = {"a", "an", "the"}
 
+UNIT_ALIASES = {
+    "piece": "piece",
+    "pieces": "piece",
+    "slice": "slice",
+    "slices": "slice",
+    "cup": "cup",
+    "cups": "cup",
+    "bowl": "bowl",
+    "bowls": "bowl",
+    "glass": "glass",
+    "glasses": "glass",
+    "serving": "serving",
+    "servings": "serving",
+    "oz": "oz",
+    "ounce": "oz",
+    "ounces": "oz",
+    "gram": "gram",
+    "grams": "gram",
+}
+
 
 def convert_number_words(text: str) -> str:
     words = str(text or "").split()
@@ -52,10 +72,19 @@ def normalize_for_matching(text: str) -> str:
     return normalized
 
 
+def sanitize_food_text(text: str) -> str:
+    # Keep letters, numbers, spaces, percent, and apostrophes for USDA-friendly queries.
+    value = str(text or "").lower()
+    value = re.sub(r"[^a-z0-9%\s']+", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
 def split_foods(query: str) -> list[str]:
     normalized = str(query or "")
     normalized = re.sub(r"\bwith\b", " and ", normalized)
     normalized = normalized.replace("&", " and ")
+    normalized = re.sub(r"[,;]", " and ", normalized)
 
     foods = [item.strip() for item in normalized.split(" and ") if item.strip()]
 
@@ -76,13 +105,42 @@ def parse_food_quantity(food_phrase: str) -> tuple[float, str]:
     if not phrase:
         return 1.0, ""
 
-    match = re.match(r"^(\d+(?:\.\d+)?)\s+(.*)$", phrase)
-    if match:
-        quantity = float(match.group(1))
-        food_name = match.group(2).strip()
+    # Match explicit multiplier form first, e.g. "2x banana".
+    times_match = re.match(r"^(\d+(?:\.\d+)?)\s*x\s+(.+)$", phrase)
+    if times_match:
+        quantity = float(times_match.group(1))
+        food_name = times_match.group(2).strip()
+        return quantity, food_name
+
+    # Match standard quantity form, e.g. "2 eggs".
+    # Requiring whitespace avoids misreading "2% yogurt" as quantity 2.
+    qty_match = re.match(r"^(\d+(?:\.\d+)?)\s+(.+)$", phrase)
+    if qty_match:
+        quantity = float(qty_match.group(1))
+        food_name = qty_match.group(2).strip()
         return quantity, food_name
 
     return 1.0, phrase
+
+
+def split_unit_from_food(food_phrase: str) -> tuple[str, str]:
+    phrase = sanitize_food_text(food_phrase)
+    if not phrase:
+        return "serving", ""
+
+    # Example: "piece of toast" -> ("piece", "toast")
+    of_match = re.match(r"^(\w+)\s+of\s+(.+)$", phrase)
+    if of_match:
+        unit = UNIT_ALIASES.get(of_match.group(1), "serving")
+        food_name = of_match.group(2).strip()
+        if food_name:
+            return unit, food_name
+
+    words = phrase.split()
+    if words and words[0] in UNIT_ALIASES and len(words) > 1:
+        return UNIT_ALIASES[words[0]], " ".join(words[1:]).strip()
+
+    return "serving", phrase
 
 
 def parse_text_transcript(raw_input: str) -> list[dict[str, Any]]:
@@ -93,13 +151,15 @@ def parse_text_transcript(raw_input: str) -> list[dict[str, Any]]:
     parsed: list[dict[str, Any]] = []
     for phrase in phrases:
         quantity, food_name = parse_food_quantity(phrase)
-        if not food_name:
+        unit, normalized_food_name = split_unit_from_food(food_name)
+        if not normalized_food_name:
             continue
         parsed.append(
             {
                 "quantity": quantity,
-                "food_name": food_name,
-                "lookup_query": normalize_for_matching(food_name),
+                "unit": unit,
+                "food_name": normalized_food_name,
+                "lookup_query": normalize_for_matching(normalized_food_name),
             }
         )
 
