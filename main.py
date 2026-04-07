@@ -1,5 +1,6 @@
+from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv(override=True)
+load_dotenv(dotenv_path=Path(__file__).resolve().with_name(".env"), override=True)
 
 import os
 import tempfile

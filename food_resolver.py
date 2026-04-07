@@ -1,6 +1,8 @@
 import os
+import json
 import re
 import string
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -8,10 +10,12 @@ from dotenv import load_dotenv
 
 from supabase_client import supabase
 
-load_dotenv(override=True)
+load_dotenv(dotenv_path=Path(__file__).resolve().with_name(".env"), override=True)
 
 
 USDA_API_KEY = os.getenv("USDA_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+_USDA_KEY_DISABLED_REASON: str | None = None
 
 
 def _log_resolution_step(message: str, **details: Any) -> None:
@@ -49,6 +53,29 @@ def _canonicalize_text(value: str) -> str:
     text = str(value or "").lower()
     text = text.translate(str.maketrans("", "", string.punctuation))
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_text_list(value: Any) -> list[str]:
+    if not value:
+        return []
+    items = value if isinstance(value, list) else [value]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        cleaned = _canonicalize_text(item)
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        normalized.append(cleaned)
+    return normalized
+
+
+def _first_nonempty(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
 
 
 def _collect_lookup_terms(food_item: str) -> list[str]:
@@ -142,11 +169,83 @@ def _looks_mixed_dish(food_item: str) -> bool:
     return any(signal in text for signal in mixed_dish_signals)
 
 
+def _local_resolution_hints(
+    food_item: str,
+    descriptors: list[str] | None = None,
+    brand: str | None = None,
+    fallback_search_query: str | None = None,
+) -> dict[str, Any]:
+    text = _canonicalize_text(food_item)
+    hints: dict[str, Any] = {}
+
+    spelling_corrections = {
+        "omlette": "omelet",
+        "omelette": "omelet",
+    }
+    if text in spelling_corrections:
+        hints["corrected_food_name"] = spelling_corrections[text]
+
+    if "toast" in text:
+        hints.setdefault("corrected_food_name", "toast")
+        hints["source_items"] = ["bread"]
+        hints["compound_foods"] = ["toast", "bread"]
+        if "avocado" in text:
+            hints["compound_foods"] = ["toast", "avocado", "bread"]
+
+    if "maggi" in text and not brand:
+        hints["brand"] = "Maggi"
+
+    if not hints:
+        return {}
+
+    return {
+        "corrected_food_name": hints.get("corrected_food_name", ""),
+        "compound_foods": _normalize_text_list(hints.get("compound_foods")),
+        "source_items": _normalize_text_list(hints.get("source_items")),
+        "brand": _first_nonempty(hints.get("brand")),
+        "notes": "",
+    }
+
+
+def _has_usable_groq_key() -> bool:
+    key = str(GROQ_API_KEY or "").strip()
+    if not key:
+        return False
+    placeholders = {
+        "your-groq-api-key",
+        "your_groq_api_key",
+        "replace-me",
+        "changeme",
+    }
+    return key.lower() not in placeholders
+
+
 def _descriptor_score(description: str, descriptors: list[str] | None) -> int:
     if not descriptors:
         return 0
     haystack = str(description or "").lower()
     return sum(1 for d in descriptors if str(d).lower() in haystack)
+
+
+def _candidate_score(food_item: str, candidate: dict, descriptors: list[str] | None) -> int:
+    description = str(candidate.get("description") or "")
+    query_tokens = set(_canonicalize_text(food_item).split())
+    description_tokens = set(_canonicalize_text(description).split())
+
+    score = _descriptor_score(description, descriptors)
+    score += len(query_tokens & description_tokens) * 2
+
+    if "toast" in query_tokens:
+        if "toast" in description_tokens or "bread" in description_tokens:
+            score += 4
+        if "oil" in description_tokens and "toast" not in description_tokens and "bread" not in description_tokens:
+            score -= 4
+
+    if "omelet" in query_tokens or "omelette" in query_tokens:
+        if "omelet" in description_tokens or "omelette" in description_tokens or "egg" in description_tokens:
+            score += 4
+
+    return score
 
 
 def _pick_usda_food(
@@ -177,7 +276,7 @@ def _pick_usda_food(
         if branded_candidates:
             return max(
                 branded_candidates,
-                key=lambda f: _descriptor_score(f.get("description"), descriptors),
+                key=lambda f: _candidate_score(food_item, f, descriptors),
             )
 
     if _looks_mixed_dish(food_item):
@@ -194,8 +293,151 @@ def _pick_usda_food(
         None,
     )
     if foundation:
-        return foundation
-    return max(candidates, key=lambda f: _descriptor_score(f.get("description"), descriptors))
+        scored_foundations = [f for f in candidates if f.get("dataType") in {"Foundation", "SR Legacy"}]
+        return max(scored_foundations, key=lambda f: _candidate_score(food_item, f, descriptors))
+    return max(candidates, key=lambda f: _candidate_score(food_item, f, descriptors))
+
+
+async def _infer_resolution_hints(
+    food_item: str,
+    descriptors: list[str] | None = None,
+    brand: str | None = None,
+    fallback_search_query: str | None = None,
+) -> dict[str, Any]:
+    if not _has_usable_groq_key():
+        return {}
+
+    prompt = """
+You are a food lookup planner. Given a user food token, infer only search-helpful hints.
+
+Return valid JSON with these optional fields:
+- corrected_food_name: the most likely spelling-corrected or normalized food name, if the token resembles a misspelling
+- compound_foods: array of component foods if the item is a compound dish
+- source_items: array of source ingredient names if the item is a transformed food or should be searched via source items
+- brand: brand name if the token looks branded, otherwise null
+- notes: short string only if useful
+
+Rules:
+- Be conservative.
+- If the token already looks like a valid food, keep corrected_food_name the same or omit it.
+- Use brand-aware reasoning for items like Maggi, Sara Lee Bread, Kellogg's, etc.
+- For items like avocado toast, return compound_foods like ["avocado", "bread"] and source_items like ["bread"].
+- For transformed foods like toast, return source_items like ["bread"] even if corrected_food_name is unchanged.
+""".strip()
+
+    user_payload = {
+        "food_item": food_item,
+        "descriptors": descriptors or [],
+        "brand": brand,
+        "fallback_search_query": fallback_search_query,
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={
+                "model": "llama3-8b-8192",
+                "messages": [
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": json.dumps(user_payload)},
+                ],
+                "temperature": 0.0,
+            },
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = text.removeprefix("```json").removeprefix("```")
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {}
+
+    if not isinstance(parsed, dict):
+        return {}
+
+    return {
+        "corrected_food_name": _first_nonempty(parsed.get("corrected_food_name"), parsed.get("food_name")),
+        "compound_foods": _normalize_text_list(parsed.get("compound_foods")),
+        "source_items": _normalize_text_list(parsed.get("source_items")),
+        "brand": _first_nonempty(parsed.get("brand")),
+        "notes": _first_nonempty(parsed.get("notes")),
+    }
+
+
+async def _lookup_with_candidates(
+    food_item: str,
+    user_id: str,
+    candidates: list[str],
+    descriptors: list[str] | None = None,
+    brand: str | None = None,
+    fallback_search_query: str | None = None,
+):
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized_candidate = _normalize_query(candidate)
+        if not normalized_candidate or normalized_candidate in seen:
+            continue
+        seen.add(normalized_candidate)
+
+        personal_match = _lookup_personal_food(
+            normalized_candidate,
+            user_id,
+            descriptors=descriptors,
+            brand=brand,
+            fallback_search_query=fallback_search_query,
+        )
+        if personal_match:
+            return _normalize_food_record(personal_match, normalized_candidate)
+
+        cache_match = _lookup_global_food(
+            normalized_candidate,
+            descriptors=descriptors,
+            brand=brand,
+            fallback_search_query=fallback_search_query,
+        )
+        if cache_match:
+            return _normalize_food_record(cache_match, normalized_candidate)
+
+        usda_data = await fetch_from_usda(
+            normalized_candidate,
+            search_query=fallback_search_query,
+            brand=brand,
+            descriptors=descriptors,
+        )
+        if usda_data:
+            cache_record = {
+                "food_name": usda_data.get("food_name", normalized_candidate),
+                "calories": usda_data.get("calories", 0),
+                "protein": usda_data.get("protein", 0),
+                "carbs": usda_data.get("carbs", 0),
+                "fat": usda_data.get("fat", 0),
+                "source": "USDA",
+                "food_category": usda_data.get("food_category") or usda_data.get("category"),
+            }
+            try:
+                supabase.table("global_foods").insert(cache_record).execute()
+                _log_resolution_step(
+                    "USDA cache insert completed",
+                    table="global_foods",
+                    food_name=cache_record.get("food_name"),
+                )
+            except Exception:
+                _log_resolution_step(
+                    "USDA cache insert skipped",
+                    table="global_foods",
+                    reason="write failure or missing table",
+                )
+            return _normalize_food_record(usda_data, normalized_candidate)
+
+    return None
 
 
 async def fetch_from_usda(
@@ -204,6 +446,12 @@ async def fetch_from_usda(
     brand: str | None = None,
     descriptors: list[str] | None = None,
 ):
+    global _USDA_KEY_DISABLED_REASON
+
+    if _USDA_KEY_DISABLED_REASON:
+        _log_resolution_step("USDA lookup skipped", reason=_USDA_KEY_DISABLED_REASON)
+        return None
+
     if not _has_usable_usda_key():
         _log_resolution_step("USDA lookup skipped", reason="missing or placeholder USDA_API_KEY")
         return None
@@ -234,10 +482,27 @@ async def fetch_from_usda(
         )
 
         if response.status_code != 200:
+            response_text = (response.text or "").strip()
+            parsed_error = ""
+            try:
+                error_payload = response.json()
+                parsed_error = str(
+                    error_payload.get("error", {}).get("code")
+                    or error_payload.get("error", {}).get("message")
+                    or ""
+                ).strip()
+            except Exception:
+                parsed_error = ""
+
+            error_blob = f"{response_text} {parsed_error}".lower()
+            if response.status_code in {401, 403} and "api_key_invalid" in error_blob:
+                _USDA_KEY_DISABLED_REASON = "USDA_API_KEY rejected by USDA (API_KEY_INVALID)"
+
             _log_resolution_step(
                 "USDA lookup failed",
                 status_code=response.status_code,
-                response_text=(response.text or "").strip()[:300],
+                response_text=response_text[:300],
+                reason=_USDA_KEY_DISABLED_REASON or "USDA request rejected",
             )
             return None
 
@@ -433,82 +698,61 @@ async def resolve_food_item(
         fallback_search_query=fallback_search_query,
     )
 
-    # 1. Check Personal DB First
-    _log_resolution_step("Tier 1 lookup started", tier="personal_foods")
-    personal_match = _lookup_personal_food(
-        normalized_food_item,
-        user_id,
-        descriptors=descriptors,
-        brand=brand,
-        fallback_search_query=fallback_search_query,
-    )
-    if personal_match:
-        _log_resolution_step(
-            "Tier 1 lookup matched",
-            tier="personal_foods",
-            food_name=personal_match.get("food_name") or normalized_food_item,
-        )
-        _log_resolution_step("Tier 2 lookup skipped", tier="global_foods", reason="personal match found")
-        _log_resolution_step("Tier 3 lookup skipped", tier="USDA", reason="personal match found")
-        return _normalize_food_record(personal_match, normalized_food_item)
-
-    _log_resolution_step("Tier 1 lookup missed", tier="personal_foods")
-
-    # 2. Check shared global cache
-    _log_resolution_step("Tier 2 lookup started", tier="global_foods")
-    cache_match = _lookup_global_food(
-        normalized_food_item,
-        descriptors=descriptors,
-        brand=brand,
-        fallback_search_query=fallback_search_query,
-    )
-    if cache_match:
-        _log_resolution_step(
-            "Tier 2 lookup matched",
-            tier="global_foods",
-            food_name=cache_match.get("food_name") or normalized_food_item,
-        )
-        _log_resolution_step("Tier 3 lookup skipped", tier="USDA", reason="global cache match found")
-        return _normalize_food_record(cache_match, normalized_food_item)
-
-    _log_resolution_step("Tier 2 lookup missed", tier="global_foods")
-
-    # 3. Fallback to USDA API
-    _log_resolution_step("Tier 3 lookup started", tier="USDA")
-    usda_data = await fetch_from_usda(
-        normalized_food_item,
-        search_query=fallback_search_query,
-        brand=brand,
-        descriptors=descriptors,
-    )
-
-    if usda_data:
-        # Save it to the cache so we never hit USDA for this exact item again.
-        cache_record = {
-            "food_name": usda_data.get("food_name", normalized_food_item),
-            "calories": usda_data.get("calories", 0),
-            "protein": usda_data.get("protein", 0),
-            "carbs": usda_data.get("carbs", 0),
-            "fat": usda_data.get("fat", 0),
-            "source": "USDA",
-            "food_category": usda_data.get("food_category") or usda_data.get("category"),
-        }
+    resolution_hints: dict[str, Any] = {}
+    if _has_usable_groq_key():
         try:
-            supabase.table("global_foods").insert(cache_record).execute()
-            _log_resolution_step(
-                "USDA cache insert completed",
-                table="global_foods",
-                food_name=cache_record.get("food_name"),
+            resolution_hints = await _infer_resolution_hints(
+                normalized_food_item,
+                descriptors=descriptors,
+                brand=brand,
+                fallback_search_query=fallback_search_query,
             )
-        except Exception:
-            # Cache writes should never fail the user-facing lookup.
-            _log_resolution_step(
-                "USDA cache insert skipped",
-                table="global_foods",
-                reason="write failure or missing table",
-            )
-            pass
-        return _normalize_food_record(usda_data, normalized_food_item)
+        except Exception as exc:
+            _log_resolution_step("Resolution hints skipped", reason="planner failed", error=str(exc))
 
-    _log_resolution_step("Tier 3 lookup missed", tier="USDA")
+    if not resolution_hints:
+        resolution_hints = _local_resolution_hints(
+            normalized_food_item,
+            descriptors=descriptors,
+            brand=brand,
+            fallback_search_query=fallback_search_query,
+        )
+
+    corrected_food_name = _normalize_query(resolution_hints.get("corrected_food_name") or "")
+    hint_brand = _first_nonempty(resolution_hints.get("brand"), brand) or None
+    compound_foods = _normalize_text_list(resolution_hints.get("compound_foods"))
+    source_items = _normalize_text_list(resolution_hints.get("source_items"))
+
+    lookup_sequence: list[tuple[str, list[str]]] = [
+        ("exact", [normalized_food_item]),
+    ]
+    if corrected_food_name and corrected_food_name != normalized_food_item:
+        lookup_sequence.append(("corrected", [corrected_food_name]))
+    if compound_foods:
+        lookup_sequence.append(("compound", compound_foods))
+    if source_items:
+        lookup_sequence.append(("source", source_items))
+
+    if hint_brand and not brand:
+        brand = hint_brand
+
+    for stage_name, stage_candidates in lookup_sequence:
+        _log_resolution_step("Lookup interval started", stage=stage_name, candidates=stage_candidates)
+        staged_match = await _lookup_with_candidates(
+            normalized_food_item,
+            user_id,
+            stage_candidates,
+            descriptors=descriptors,
+            brand=brand,
+            fallback_search_query=fallback_search_query,
+        )
+        if staged_match:
+            _log_resolution_step(
+                "Lookup interval matched",
+                stage=stage_name,
+                food_name=staged_match.get("food_name") or normalized_food_item,
+            )
+            return staged_match
+
+    _log_resolution_step("Lookup intervals exhausted", food_item=normalized_food_item)
     return None  # Food not found anywhere

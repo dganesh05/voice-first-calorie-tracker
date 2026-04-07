@@ -1,12 +1,13 @@
 import os
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 import httpx
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().with_name(".env"))
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
@@ -47,26 +48,6 @@ UNIT_ALIASES = {
     "ounces": "oz",
     "gram": "gram",
     "grams": "gram",
-}
-
-SOURCE_FOOD_HINTS = {
-    "toast": ["bread"],
-    "omelette": ["egg"],
-    "omelet": ["egg"],
-    "scrambled egg": ["egg"],
-    "fried egg": ["egg"],
-    "hash brown": ["potato"],
-    "fries": ["potato"],
-    "mashed potato": ["potato"],
-}
-
-FOOD_ALIASES = {
-    "omlette": "omelette",
-    "omelet": "omelette",
-}
-
-COMPOUND_FOOD_SPLITS = {
-    "avocado toast": ["avocado", "toast"],
 }
 
 
@@ -133,40 +114,30 @@ def _normalize_food_name_and_unit(food_name: str, unit: str) -> tuple[str, str]:
                 normalized_unit = parsed_unit
             cleaned_food = parsed_food
 
-    canonical_food = FOOD_ALIASES.get(cleaned_food, cleaned_food)
-    return canonical_food, normalized_unit
+    return cleaned_food, normalized_unit
 
 
-def _split_compound_food(food_name: str) -> list[str]:
-    canonical = _sanitize_food_text(food_name)
-    splits = COMPOUND_FOOD_SPLITS.get(canonical)
-    if not splits:
-        return [canonical] if canonical else []
-    return [_sanitize_food_text(item) for item in splits if _sanitize_food_text(item)]
+def _normalize_text_list(value: Any) -> list[str]:
+    if not value:
+        return []
+    items = value if isinstance(value, list) else [value]
 
-
-def _source_terms_for_food(food_name: str, descriptors: list[str] | None = None) -> list[str]:
-    searchable = _sanitize_food_text(" ".join([food_name, *(descriptors or [])]))
-    source_terms: list[str] = []
-
-    for alias, terms in SOURCE_FOOD_HINTS.items():
-        if alias not in searchable:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        cleaned = _sanitize_food_text(item)
+        if not cleaned or cleaned in seen:
             continue
-        for term in terms:
-            sanitized = _sanitize_food_text(term)
-            if not sanitized:
-                continue
-            if sanitized in searchable or sanitized in source_terms:
-                continue
-            source_terms.append(sanitized)
-
-    return source_terms
+        seen.add(cleaned)
+        normalized.append(cleaned)
+    return normalized
 
 
 def _build_fallback_query(
     brand: str | None,
     descriptors: list[str],
     food_name: str,
+    source_items: list[str] | None = None,
     base_query: str | None = None,
 ) -> str:
     parts = []
@@ -176,7 +147,7 @@ def _build_fallback_query(
         parts.append(_sanitize_food_text(brand))
     parts.extend([_sanitize_food_text(d) for d in descriptors])
     parts.append(_sanitize_food_text(food_name))
-    parts.extend(_source_terms_for_food(food_name, descriptors))
+    parts.extend(_normalize_text_list(source_items))
 
     deduped_parts: list[str] = []
     seen_parts: set[str] = set()
@@ -203,6 +174,8 @@ def _normalize_top_level_payload(parsed: Any) -> list[dict[str, Any]]:
                     "food_name": dish_name,
                     "descriptors": [],
                     "brand": None,
+                    "split_foods": [dish_name],
+                    "source_items": [],
                     "fallback_search_query": dish_name,
                 }
             ]
@@ -227,14 +200,16 @@ For each distinct food item mentioned, extract exactly these fields:
 - "food_name": base food name
 - "descriptors": array of modifiers/adjectives
 - "brand": brand name if explicit, otherwise null
-- "fallback_search_query": concatenation of brand + descriptors + food_name + source ingredient terms when relevant
+- "split_foods": array of resolvable foods for this item. For compound dishes, include each component food; for simple foods, include [food_name].
+- "source_items": array of source ingredients/components that help search (can be empty)
+- "fallback_search_query": concise search phrase using brand + descriptors + component/source context
 
 Rules:
 - Return only JSON array.
 - Ensure each object has all fields.
 - Keep descriptors as an array (can be empty).
-- Add source ingredient hints in fallback_search_query for transformed foods.
-    Examples: toast -> include bread, omelette -> include egg.
+- Use food-context reasoning (not fixed mappings) to infer split_foods and source_items.
+- If the transcript implies transformed or composite foods, include likely component foods in split_foods/source_items.
 """.strip()
     user_prompt = f"Process this transcript:\n\"{transcript}\""
     
@@ -278,13 +253,17 @@ Rules:
             brand = _sanitize_food_text(brand) if brand else None
 
             base_query = str(entry.get("fallback_search_query") or "").strip() or None
-            split_foods = _split_compound_food(food_name)
+            source_items = _normalize_text_list(entry.get("source_items"))
+            split_foods = _normalize_text_list(entry.get("split_foods"))
+            if not split_foods:
+                split_foods = [food_name]
 
             for split_food in split_foods:
                 fallback_search_query = _build_fallback_query(
                     brand,
                     descriptors,
                     split_food,
+                    source_items=source_items,
                     base_query=base_query,
                 )
 
@@ -295,6 +274,7 @@ Rules:
                         "food_name": split_food,
                         "descriptors": descriptors,
                         "brand": brand,
+                        "source_items": source_items,
                         "fallback_search_query": fallback_search_query,
                     }
                 )
