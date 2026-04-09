@@ -1,0 +1,72 @@
+const journalEntries: JournalDay[] = [
+  {
+    id: "today",
+    day: "Today",
+    date: "April 9, 2026",
+    meals: [
+      {
+        id: "m1",
+        name: "2 Parathas",
+        time: "8:00 AM",
+        calories: "600 kcal",
+        protein: "12g",
+      },
+      {
+        id: "m2",
+        name: "3 Egg Omelette",
+        time: "8:10 AM",
+        calories: "270 kcal",
+        protein: "18g",
+      },
+      {
+        id: "m3",
+        name: "Cup of Chai",
+        time: "8:20 AM",
+        calories: "120 kcal",
+        protein: "3g",
+      },
+      {
+        id: "m4",
+        name: "Dubai Chocolate Cake Slice",
+        time: "8:30 AM",
+        calories: "350 kcal",
+        protein: "5g",
+      },
+      {
+        id: "m5",
+        name: "Footlong Chicken Philly Sub",
+        time: "1:30 PM",
+        calories: "900 kcal",
+        protein: "50g",
+      },
+      {
+        id: "m6",
+        name: "White Kidney Beans (Rajma)",
+        time: "7:30 PM",
+        calories: "230 kcal",
+        protein: "15g",
+      },
+      {
+        id: "m7",
+        name: "Brown Rice",
+        time: "7:35 PM",
+        calories: "215 kcal",
+        protein: "5g",
+      },
+      {
+        id: "m8",
+        name: "Salmon (piece)",
+        time: "7:40 PM",
+        calories: "250 kcal",
+        protein: "25g",
+      },
+      {
+        id: "m9",
+        name: "Banana Shake",
+        time: "5:00 PM",
+        calories: "300 kcal",
+        protein: "10g",
+      },
+    ],
+  },
+];
