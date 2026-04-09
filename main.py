@@ -383,8 +383,10 @@ async def extract_foods_with_ai(query: str):
 def estimate_portion(food_text: str):
     """
     Estimates quantity based on text like:
-    "one bowl pasta" → 1
-    "two bowls pasta" → 2
+    - "one bowl pasta" → 1
+    - "two bowls pasta" → 2
+    - "half cup rice" → 0.5
+    - "1.5 slices bread" → 1.5
     Defaults to 1 if unclear.
     """
     try:
@@ -392,16 +394,28 @@ def estimate_portion(food_text: str):
 Return ONLY JSON: {"quantity": number}
 
 Rules:
-- one=1, two=2, three=3
-- a/an=1
-- bowl=1, plate=1   # <-- changed from 2 to 1
-- slice=1, cup=1, glass=1
+1. NUMBER WORDS
+- one → 1, two → 2, three → 3, four → 4, five → 5
+- a/an → 1
+- half → 0.5, quarter → 0.25
+- If a decimal is written (e.g., 1.5) → use it directly
 
-Examples:
-"one bowl pasta" → 1
-"two bowls pasta" → 2
+2. UNITS
+- bowl, plate, cup, glass, slice → do NOT multiply; unit only helps clarify
+- Ignore words like 'serving', 'piece', 'portion' unless numeric
 
-If unclear → 1
+3. DEFAULT
+- If no number found → 1
+- Fractions or mixed numbers should be handled correctly
+
+EXAMPLES:
+- "one bowl pasta" → 1
+- "two bowls pasta" → 2
+- "half cup rice" → 0.5
+- "1.5 slices bread" → 1.5
+- "a plate of chicken" → 1
+
+Return JSON only, nothing else.
 """)
         data = extract_json(text)
         return float(data.get("quantity", 1))
