@@ -18,6 +18,7 @@ from supabase_client import auth_supabase, supabase
 from food_resolver import resolve_food_item
 from llm_parser import parse_raw_transcript
 from transcript_parser import parse_text_transcript
+from journal import add_to_journal, get_journal
 
 app = FastAPI()
 
@@ -612,34 +613,8 @@ async def confirm_food_log(
     payload: FoodConfirmRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    if not payload.items:
-        raise HTTPException(status_code=400, detail="No items provided for journal commit")
-
-    logged_at = payload.logged_at or datetime.now(timezone.utc)
-    rows = []
-    for item in payload.items:
-        rows.append(
-            {
-                "user_id": user_id,
-                "food_name": item.name,
-                "calories": item.calories,
-                "protein": item.protein,
-                "carbs": item.carbs,
-                "fat": item.fat,
-                "logged_at": logged_at.isoformat(),
-            }
-        )
-
-    try:
-        supabase.table("daily_logs").insert(rows).execute()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to save daily log: {exc}") from exc
-
-    return {
-        "status": "success",
-        "inserted": len(rows),
-        "logged_at": logged_at.isoformat(),
-    }
+    items = [{"name": i.name, "calories": i.calories, "protein": i.protein, "carbs": i.carbs, "fat": i.fat} for i in payload.items]
+    return add_to_journal(user_id, items, logged_at=payload.logged_at)
 
 
 @app.post("/foods/manual")
@@ -681,62 +656,11 @@ async def add_manual_food(
 
 
 @app.get("/journal")
-async def get_journal(
+async def get_journal_route(
     journal_date: date | None = None,
     user_id: str = Depends(get_current_user_id),
 ):
-    day = journal_date or date.today()
-    start_dt = datetime.combine(day, time.min).replace(tzinfo=timezone.utc)
-    end_dt = start_dt + timedelta(days=1)
-
-    try:
-        response = (
-            supabase.table("daily_logs")
-            .select("food_name, calories, protein, carbs, fat, logged_at")
-            .eq("user_id", user_id)
-            .gte("logged_at", start_dt.isoformat())
-            .lt("logged_at", end_dt.isoformat())
-            .order("logged_at")
-            .execute()
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch journal: {exc}") from exc
-
-    logs = response.data or []
-    totals = {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0}
-
-    for row in logs:
-        totals["calories"] += float(row.get("calories") or 0)
-        totals["protein"] += float(row.get("protein") or 0)
-        totals["carbs"] += float(row.get("carbs") or 0)
-        totals["fat"] += float(row.get("fat") or 0)
-
-    daily_calorie_goal = None
-    try:
-        user_response = (
-            supabase.table("users")
-            .select("daily_calorie_goal")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
-        )
-        if user_response.data:
-            daily_calorie_goal = user_response.data[0].get("daily_calorie_goal")
-    except Exception:
-        daily_calorie_goal = None
-
-    calorie_delta = None
-    if daily_calorie_goal is not None:
-        calorie_delta = float(daily_calorie_goal) - totals["calories"]
-
-    return {
-        "status": "success",
-        "date": day.isoformat(),
-        "logs": logs,
-        "totals": totals,
-        "daily_calorie_goal": daily_calorie_goal,
-        "calorie_delta": calorie_delta,
-    }
+    return get_journal(user_id, journal_date)
 
 
 @app.get("/profile")
