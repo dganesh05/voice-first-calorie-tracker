@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Vocalorie Journal</title>
+
+    <style>
+        :root {
+            --bg-main: #0b1220;
+            --bg-alt: #07121a;
+            --panel: rgba(255, 255, 255, 0.06);
+            --ink: #e8eef8;
+            --accent: #10b981;
+            --accent-warm: #f59e0b;
+            --muted: rgba(232, 238, 248, 0.72);
+            --line: rgba(255, 255, 255, 0.14);
+            --danger: #f87171;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Segoe UI", "Avenir Next", sans-serif;
+            margin: 0;
+            min-height: 100vh;
+            color: var(--ink);
+            background: linear-gradient(180deg, var(--bg-main) 0%, var(--bg-main) 52%, var(--bg-alt) 100%);
+            padding: 24px 14px 60px;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        .bg-glow {
+            pointer-events: none;
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            overflow: hidden;
+        }
+
+        .bg-glow::before,
+        .bg-glow::after {
+            content: "";
+            position: absolute;
+            border-radius: 999px;
+            filter: blur(120px);
+        }
+
+        .bg-glow::before {
+            width: 560px;
+            height: 560px;
+            background: rgba(16, 185, 129, 0.22);
+            top: -180px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .bg-glow::after {
+            width: 420px;
+            height: 420px;
+            background: rgba(14, 165, 233, 0.18);
+            right: -140px;
+            bottom: 20px;
+        }
+
+        .layout {
+            width: min(920px, 100%);
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 14px;
+            margin-bottom: 14px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            backdrop-filter: blur(8px);
+        }
+
+        .brand {
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            color: #ffffff;
+            text-decoration: none;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .nav-link {
+            text-decoration: none;
+            color: var(--muted);
+            font-weight: 700;
+            padding: 7px 11px;
+            border-radius: 999px;
+            border: 1px solid transparent;
+            transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+        }
+
+        .nav-link:hover {
+            color: #ffffff;
+            border-color: var(--line);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        h1 {
+            text-align: center;
+            font-size: clamp(1.8rem, 2.6vw, 2.3rem);
+            margin: 8px 0 20px;
+            color: #ffffff;
+            text-shadow: 0 0 18px rgba(16, 185, 129, 0.22);
+        }
+
+        .panel {
+            background: var(--panel);
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            box-shadow: 0 18px 38px rgba(3, 8, 20, 0.42);
+            padding: 18px;
+            margin-bottom: 16px;
+            backdrop-filter: blur(8px);
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        button {
+            border: none;
+            border-radius: 999px;
+            padding: 10px 14px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.15s ease, filter 0.2s ease, opacity 0.2s ease;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.06);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            filter: none;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #052015;
+        }
+
+        .btn-warm {
+            background: var(--accent-warm);
+            color: #fff7ed;
+        }
+
+        .status {
+            min-height: 1.1rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-top: 8px;
+            color: var(--muted);
+        }
+
+        .status.error {
+            color: var(--danger);
+        }
+
+        .grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .entry {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .entry h3 {
+            margin: 0 0 6px;
+            font-size: 1rem;
+            color: #ffffff;
+        }
+
+        .entry p {
+            margin: 0 0 8px;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .macro-row {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .macro-cell {
+            border: 1px solid var(--line);
+            border-radius: 11px;
+            padding: 8px;
+            text-align: center;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .macro-label {
+            font-size: 0.72rem;
+            color: var(--muted);
+            margin-bottom: 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .macro-value {
+            font-weight: 800;
+            font-size: 1rem;
+            color: #ffffff;
+        }
+
+        @media (max-width: 640px) {
+            .macro-row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<div class="bg-glow" aria-hidden="true"></div>
+<div class="layout">
+    <nav class="navbar" aria-label="Main navigation">
+        <a class="brand" href="/log">Vocalorie</a>
+        <div class="nav-links">
+            <a class="nav-link" href="/log">Log Meal</a>
+            <a class="nav-link" href="/journal-page">Journal</a>
+        </div>
+    </nav>
+
+    <h1>Journal</h1>
+
+    <section class="panel">
+        <div class="toolbar">
+            <button id="refreshBtn" class="btn-primary">Refresh Journal</button>
+            <button id="logoutBtn" class="btn-warm">Log Out</button>
+        </div>
+        <div id="status" class="status"></div>
+        <div id="entries" class="grid"></div>
+    </section>
+</div>
+
+<script>
+    const refreshBtn = document.getElementById("refreshBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const statusEl = document.getElementById("status");
+    const entriesEl = document.getElementById("entries");
+
+    function fmt(value) {
+        const n = Number(value || 0);
+        return Number.isFinite(n) ? n.toFixed(1) : "0.0";
+    }
+
+    function setStatus(message, type = "") {
+        statusEl.textContent = message;
+        statusEl.className = `status ${type}`;
+    }
+
+    async function apiFetch(path, options = {}) {
+        const response = await fetch(path, options);
+        let payload = {};
+        try {
+            payload = await response.json();
+        } catch {
+            payload = {};
+        }
+
+        if (!response.ok) {
+            throw new Error(payload.detail || "Request failed");
+        }
+
+        return payload;
+    }
+
+    function entryTemplate(item) {
+        return `
+            <article class="entry">
+                <h3>${item.food_name || item.name || "Food item"}</h3>
+                <p>Logged at: ${item.logged_at || item.created_at || "unknown"}</p>
+                <div class="macro-row">
+                    <div class="macro-cell"><div class="macro-label">Calories</div><div class="macro-value">${fmt(item.calories)}</div></div>
+                    <div class="macro-cell"><div class="macro-label">Protein</div><div class="macro-value">${fmt(item.protein)} g</div></div>
+                    <div class="macro-cell"><div class="macro-label">Carbs</div><div class="macro-value">${fmt(item.carbs)} g</div></div>
+                    <div class="macro-cell"><div class="macro-label">Fat</div><div class="macro-value">${fmt(item.fat)} g</div></div>
+                </div>
+            </article>
+        `;
+    }
+
+    async function loadJournal() {
+        refreshBtn.disabled = true;
+        setStatus("Loading journal...", "");
+
+        try {
+            const payload = await apiFetch("/journal");
+            const entries = payload.items || payload.entries || payload.journal || [];
+
+            if (!entries.length) {
+                entriesEl.innerHTML = "";
+                setStatus("No journal entries found yet.", "");
+                return;
+            }
+
+            entriesEl.innerHTML = entries.map(entryTemplate).join("");
+            setStatus(`Loaded ${entries.length} journal entries.`, "");
+        } catch (error) {
+            setStatus(error.message || "Failed to load journal.", "error");
+        } finally {
+            refreshBtn.disabled = false;
+        }
+    }
+
+    async function logout() {
+        try {
+            await apiFetch("/logout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" }
+            });
+            window.location.href = "/auth";
+        } catch (error) {
+            setStatus(error.message || "Failed to log out.", "error");
+        }
+    }
+
+    refreshBtn.addEventListener("click", loadJournal);
+    logoutBtn.addEventListener("click", logout);
+
+    loadJournal();
+</script>
+</body>
+</html>

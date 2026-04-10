@@ -235,6 +235,17 @@ async def log_page(
     return templates.TemplateResponse(request, "front_end.html")
 
 
+@app.get("/journal-page", response_class=HTMLResponse)
+async def journal_page(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
+    user_id = _resolve_optional_user_id(request, credentials)
+    if not user_id:
+        return templates.TemplateResponse(request, "auth.html")
+    return templates.TemplateResponse(request, "journal.html")
+
+
 @app.get("/auth", response_class=HTMLResponse)
 async def auth_page(
     request: Request,
