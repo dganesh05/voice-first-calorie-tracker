@@ -1,14 +1,18 @@
 from datetime import date, datetime, time, timedelta, timezone
-from collections import defaultdict
 from fastapi import HTTPException
 from supabase_client import supabase
 
 
 def add_to_journal(user_id: str, items: list[dict], logged_at: datetime = None):
+    """
+    Takes a list of resolved food items and writes them to daily_logs.
+    Called after the user confirms their meal.
+    """
     if not items:
         raise HTTPException(status_code=400, detail="No items provided")
 
     logged_at = logged_at or datetime.now(timezone.utc)
+
     rows = []
     for item in items:
         rows.append({
@@ -34,6 +38,9 @@ def add_to_journal(user_id: str, items: list[dict], logged_at: datetime = None):
 
 
 def get_journal(user_id: str, journal_date: date = None):
+    """
+    Fetches all food entries for a given day and computes daily macro totals.
+    """
     day = journal_date or date.today()
     start_dt = datetime.combine(day, time.min).replace(tzinfo=timezone.utc)
     end_dt = start_dt + timedelta(days=1)
@@ -45,7 +52,7 @@ def get_journal(user_id: str, journal_date: date = None):
             .eq("user_id", user_id)
             .gte("logged_at", start_dt.isoformat())
             .lt("logged_at", end_dt.isoformat())
-            .order("logged_at", desc=True)  # CHANGED: descending order
+            .order("logged_at")
             .execute()
         )
     except Exception as exc:
@@ -53,80 +60,48 @@ def get_journal(user_id: str, journal_date: date = None):
 
     logs = response.data or []
 
-    # ADDED: group entries by date, newest date first
-    grouped = defaultdict(list)
-    for row in logs:
-        row_date = row["logged_at"][:10]  # grab just YYYY-MM-DD
-        grouped[row_date].append(row)
+    
+# Compute daily totals
+    totals = {
+        "calories": 0.0,
+        "protein": 0.0,
+        "carbs": 0.0,
+        "fat": 0.0,
+    }
 
-    grouped_by_date = [
-        {"date": d, "entries": entries}
-        for d, entries in sorted(grouped.items(), reverse=True)
-    ]
+    for entry in logs:
+        totals["calories"] += float(entry.get("calories") or 0)
+        totals["protein"] += float(entry.get("protein") or 0)
+        totals["carbs"] += float(entry.get("carbs") or 0)
+        totals["fat"] += float(entry.get("fat") or 0)
 
-    # Compute totals for the requested day
-    totals = {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0}
-    for row in logs:
-        totals["calories"] += float(row.get("calories") or 0)
-        totals["protein"] += float(row.get("protein") or 0)
-        totals["carbs"] += float(row.get("carbs") or 0)
-        totals["fat"] += float(row.get("fat") or 0)
+    # Get user's calorie goal
+    calorie_goal = None
 
-    # ADDED: fetch all logs for chart aggregation (last 30 days)
-    chart_start = datetime.now(timezone.utc) - timedelta(days=30)
     try:
-        chart_response = (
-            supabase.table("daily_logs")
-            .select("calories, protein, carbs, fat, logged_at")
-            .eq("user_id", user_id)
-            .gte("logged_at", chart_start.isoformat())
-            .order("logged_at", desc=True)
-            .execute()
-        )
-    except Exception:
-        chart_response = None
-
-    # ADDED: aggregate chart data by day
-    chart_data = defaultdict(lambda: {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0})
-    for row in (chart_response.data or []):
-        row_date = row["logged_at"][:10]
-        chart_data[row_date]["calories"] += float(row.get("calories") or 0)
-        chart_data[row_date]["protein"] += float(row.get("protein") or 0)
-        chart_data[row_date]["carbs"] += float(row.get("carbs") or 0)
-        chart_data[row_date]["fat"] += float(row.get("fat") or 0)
-
-    # Sort chart data newest first
-    chart_aggregation = [
-        {"date": d, **vals}
-        for d, vals in sorted(chart_data.items(), reverse=True)
-    ]
-
-    # Fetch calorie goal
-    daily_calorie_goal = None
-    try:
-        user_response = (
+        result = (
             supabase.table("users")
             .select("daily_calorie_goal")
             .eq("id", user_id)
             .limit(1)
             .execute()
         )
-        if user_response.data:
-            daily_calorie_goal = user_response.data[0].get("daily_calorie_goal")
-    except Exception:
-        pass
 
-    calorie_delta = None
-    if daily_calorie_goal is not None:
-        calorie_delta = float(daily_calorie_goal) - totals["calories"]
+        if result.data:
+            calorie_goal = result.data[0].get("daily_calorie_goal")
+    except Exception:
+        calorie_goal = None
+
+    # Calculate remaining calories
+    remaining_calories = None
+    if calorie_goal is not None:
+        remaining_calories = float(calorie_goal) - totals["calories"]
 
     return {
         "status": "success",
         "date": day.isoformat(),
-        "logs": logs,
-        "grouped_by_date": grouped_by_date,   # ADDED: grouped + sorted descending
+        "entries": logs,
         "totals": totals,
-        "chart_aggregation": chart_aggregation, # ADDED: per-day totals for charts
-        "daily_calorie_goal": daily_calorie_goal,
-        "calorie_delta": calorie_delta,
+        "calorie_goal": calorie_goal,
+        "remaining_calories": remaining_calories,
     }
