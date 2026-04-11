@@ -188,6 +188,85 @@
             gap: 12px;
         }
 
+        .summary-grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            margin-bottom: 12px;
+        }
+
+        .summary-card {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .summary-card h3 {
+            margin: 0 0 5px;
+            font-size: 0.95rem;
+        }
+
+        .summary-card p {
+            margin: 0;
+            font-size: 0.86rem;
+            color: var(--muted);
+        }
+
+        .chart-wrap {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            margin-bottom: 12px;
+        }
+
+        .chart-title {
+            margin: 0 0 10px;
+            font-size: 0.9rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .chart-bars {
+            display: grid;
+            gap: 8px;
+        }
+
+        .chart-row {
+            display: grid;
+            grid-template-columns: 62px 1fr 70px;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .chart-date {
+            font-size: 0.8rem;
+            color: var(--muted);
+        }
+
+        .chart-track {
+            width: 100%;
+            height: 10px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            overflow: hidden;
+        }
+
+        .chart-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #10b981, #14b8a6);
+        }
+
+        .chart-value {
+            font-size: 0.8rem;
+            text-align: right;
+            color: #ffffff;
+            font-weight: 700;
+        }
+
         .entry {
             border: 1px solid var(--line);
             border-radius: 16px;
@@ -236,6 +315,14 @@
         }
 
         @media (max-width: 640px) {
+            .summary-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .chart-row {
+                grid-template-columns: 52px 1fr 62px;
+            }
+
             .macro-row {
                 grid-template-columns: 1fr;
             }
@@ -262,6 +349,11 @@
             <button id="logoutBtn" class="btn-warm">Log Out</button>
         </div>
         <div id="status" class="status"></div>
+        <div id="summaryDays" class="summary-grid"></div>
+        <div class="chart-wrap">
+            <h2 class="chart-title">Calories (Last 7 days)</h2>
+            <div id="chartBars" class="chart-bars"></div>
+        </div>
         <div id="entries" class="grid"></div>
     </section>
 </div>
@@ -271,6 +363,8 @@
     const logoutBtn = document.getElementById("logoutBtn");
     const statusEl = document.getElementById("status");
     const entriesEl = document.getElementById("entries");
+    const summaryDaysEl = document.getElementById("summaryDays");
+    const chartBarsEl = document.getElementById("chartBars");
 
     function fmt(value) {
         const n = Number(value || 0);
@@ -280,6 +374,17 @@
     function setStatus(message, type = "") {
         statusEl.textContent = message;
         statusEl.className = `status ${type}`;
+    }
+
+    function toISODate(d) {
+        return d.toISOString().slice(0, 10);
+    }
+
+    function shortDate(iso) {
+        if (!iso) return "--";
+        const [y, m, d] = String(iso).split("-");
+        if (!y || !m || !d) return String(iso);
+        return `${m}/${d}`;
     }
 
     async function apiFetch(path, options = {}) {
@@ -313,22 +418,66 @@
         `;
     }
 
+    function summaryDayTemplate(day) {
+        const totals = day.totals || {};
+        const entries = Array.isArray(day.entries) ? day.entries : [];
+        return `
+            <article class="summary-card">
+                <h3>${day.date || "Unknown day"}</h3>
+                <p>${entries.length} entries</p>
+                <p>${fmt(totals.calories)} kcal · P ${fmt(totals.protein)}g · C ${fmt(totals.carbs)}g · F ${fmt(totals.fat)}g</p>
+            </article>
+        `;
+    }
+
+    function chartRowTemplate(point, maxCalories) {
+        const calories = Number(point.calories || 0);
+        const width = maxCalories > 0 ? Math.max((calories / maxCalories) * 100, 4) : 0;
+        return `
+            <div class="chart-row">
+                <div class="chart-date">${shortDate(point.date)}</div>
+                <div class="chart-track"><div class="chart-fill" style="width: ${width}%"></div></div>
+                <div class="chart-value">${fmt(calories)}</div>
+            </div>
+        `;
+    }
+
     async function loadJournal() {
         refreshBtn.disabled = true;
         setStatus("Loading journal...", "");
 
         try {
-            const payload = await apiFetch("/journal");
+            const today = new Date();
+            const start = new Date(today);
+            start.setDate(today.getDate() - 6);
+
+            const rangeQuery = `?start_date=${toISODate(start)}&end_date=${toISODate(today)}`;
+
+            const [payload, summaryPayload, chartPayload] = await Promise.all([
+                apiFetch("/journal"),
+                apiFetch(`/journal/summary${rangeQuery}`),
+                apiFetch(`/journal/chart${rangeQuery}`),
+            ]);
+
             const entries = payload.items || payload.entries || payload.journal || [];
+            const days = summaryPayload.days || [];
+            const chartData = chartPayload.chart_data || [];
 
             if (!entries.length) {
                 entriesEl.innerHTML = "";
+                summaryDaysEl.innerHTML = "";
+                chartBarsEl.innerHTML = "";
                 setStatus("No journal entries found yet.", "");
                 return;
             }
 
             entriesEl.innerHTML = entries.map(entryTemplate).join("");
-            setStatus(`Loaded ${entries.length} journal entries.`, "");
+            summaryDaysEl.innerHTML = days.map(summaryDayTemplate).join("");
+
+            const maxCalories = chartData.reduce((max, row) => Math.max(max, Number(row.calories || 0)), 0);
+            chartBarsEl.innerHTML = chartData.map((point) => chartRowTemplate(point, maxCalories)).join("");
+
+            setStatus(`Loaded ${entries.length} journal entries across ${days.length || 0} days.`, "");
         } catch (error) {
             setStatus(error.message || "Failed to load journal.", "error");
         } finally {

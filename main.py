@@ -18,7 +18,7 @@ from supabase_client import auth_supabase, supabase
 from food_resolver import resolve_food_item
 from llm_parser import parse_raw_transcript
 from transcript_parser import parse_text_transcript
-from journal import add_to_journal, get_journal
+from journal import add_to_journal, get_chart_data, get_journal, get_journal_summary
 
 app = FastAPI()
 
@@ -672,6 +672,40 @@ async def get_journal_route(
     user_id: str = Depends(get_current_user_id),
 ):
     return get_journal(user_id, journal_date)
+
+
+def _resolve_journal_range(
+    start_date: date | None,
+    end_date: date | None,
+    default_window_days: int = 7,
+) -> tuple[date, date]:
+    resolved_end = end_date or date.today()
+    resolved_start = start_date or (resolved_end - timedelta(days=default_window_days - 1))
+
+    if resolved_start > resolved_end:
+        raise HTTPException(status_code=400, detail="start_date cannot be after end_date")
+
+    return resolved_start, resolved_end
+
+
+@app.get("/journal/summary")
+async def get_journal_summary_route(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    user_id: str = Depends(get_current_user_id),
+):
+    resolved_start, resolved_end = _resolve_journal_range(start_date, end_date)
+    return get_journal_summary(user_id, resolved_start, resolved_end)
+
+
+@app.get("/journal/chart")
+async def get_journal_chart_route(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    user_id: str = Depends(get_current_user_id),
+):
+    resolved_start, resolved_end = _resolve_journal_range(start_date, end_date)
+    return get_chart_data(user_id, resolved_start, resolved_end)
 
 
 @app.get("/profile")
