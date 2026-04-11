@@ -11,9 +11,9 @@ from collections import defaultdict
 from threading import Lock
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from tavily import TavilyClient
@@ -100,6 +100,17 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 # ------------------ CLIENTS ------------------
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 groq_client = OpenAI(
     api_key=GROQ_API_KEY,
@@ -399,22 +410,11 @@ PARSING RULES
   "scrambled eggs" → "egg"
   "a glass of milk" → "milk"
 
-4. BRAND-ONLY FOOD MENTIONS (QUALITY CONTROL)
-- If the user says only a brand name, map it to the most common primary food that people eat for that brand.
-- Prefer the core meal item, NOT side products, flavor sachets, seasoning packets, oils, or sauces unless those are explicitly spoken.
-- Keep this rule generalizable across brands:
-    - "Maggi" → "instant noodles"
-    - "Nutella" → "hazelnut spread"
-    - "Oreo" → "oreo cookie"
-- If brand + product type is provided, preserve it directly:
-    - "Maggi noodles" → "maggi noodles"
-    - "Coca-Cola" → "coke"
-
-5. DISH PRESERVATION
+4. DISH PRESERVATION
 - Keep full dish description intact
 - Do NOT split ingredients inside a dish
 
-6. IGNORE FILLER TEXT
+5. IGNORE FILLER TEXT
 Ignore:
 "I had", "for lunch", "today", etc.
 
@@ -494,46 +494,6 @@ Output:
 
 ---
 
-Input: "I ate Maggi"
-Output:
-[
-    {"food": "instant noodles", "quantity": 1}
-]
-
----
-
-Input: "I ate Maggi noodles"
-Output:
-[
-    {"food": "maggi noodles", "quantity": 1}
-]
-
----
-
-Input: "I had Yippee"
-Output:
-[
-    {"food": "instant noodles", "quantity": 1}
-]
-
----
-
-Input: "I ate Top Ramen"
-Output:
-[
-    {"food": "instant noodles", "quantity": 1}
-]
-
----
-
-Input: "I drank Frooti"
-Output:
-[
-    {"food": "mango drink", "quantity": 1}
-]
-
----
-
 Input: "I had pasta and later drank milk"
 Output:
 [
@@ -554,7 +514,7 @@ NO extra text.
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse(request, "front_end.html", {"request": request})
+    return templates.TemplateResponse("front_end.html", {"request": request})
 
 @app.get("/foods/search", response_class=HTMLResponse)
 async def usda_api(request: Request, query: str):
@@ -974,7 +934,7 @@ async def delete_journal_entry(
         raise translated
 
 @app.post("/voice")
-async def voice_input(request: Request, file: UploadFile = File(...)):
+async def voice_input(file: UploadFile = File(...)):
     transcript = await transcribe_audio(file)
     if not transcript:
         return {"error": "Transcription failed"}
@@ -1004,9 +964,8 @@ async def voice_input_json(
 
     return {
         "transcript": transcript,
-        "query": cleaned_query,
         "results": results,
-        "totals": totals,
+        "totals": totals
     }
 
 # ------------------ CLEAN INPUT ------------------
@@ -1047,7 +1006,7 @@ async def transcribe_audio(file):
         filename = file.filename or "audio.webm"
         content_type = file.content_type or "application/octet-stream"
         response = stt_client.audio.transcriptions.create(
-            file=(filename, audio_bytes, content_type),
+            file=("audio.wav", audio_bytes),
             model="whisper-large-v3-turbo"
         )
         return response.text
@@ -1163,68 +1122,31 @@ async def fetch_usda(food_name: str):
             if n.get("nutrientName") in lookup:
                 nutrition[lookup[n["nutrientName"]]] = n.get("value", "Not Available")
 
-        return {
-            "nutrition": nutrition,
-            "source": "USDA FoodData Central",
-            "source_item": selected.get("description") or food_name,
-        }
+        return nutrition
 
 # ------------------ PROCESS ------------------
 
-async def compute_results_and_totals(foods):
+async def process_foods_json(foods):
     results = []
     totals = {
         "calories": 0,
         "protein_g": 0,
         "carbs_g": 0,
-        "fat_g": 0,
-        "sugar_g": 0,
-        "fiber_g": 0,
-        "vitamin_d_mcg": 0
+        "fat_g": 0
     }
 
-    totals_available = {k: False for k in totals}
-
     for food in foods:
-        resolved = await fetch_usda(food["food"])
-        nutrition = resolved["nutrition"] if resolved else {k: "Not Available" for k in totals}
-        source = resolved["source"] if resolved else "Not Available"
-        source_item = resolved["source_item"] if resolved else food["food"]
-
-        for k in nutrition:
-            if isinstance(nutrition[k], (int, float)):
-                nutrition[k] *= food["quantity"]
-                totals_available[k] = True
-            else:
-                nutrition[k] = "Not Available"
-
-        results.append({
-            "food": f"{food['quantity']} x {food['food']}",
-            "source": source,
-            "source_item": source_item,
-            **nutrition
-        })
+        nutrition = await fetch_usda(food["food"]) or {}
 
         for k in totals:
-            if isinstance(nutrition[k], (int, float)):
-                totals[k] += nutrition[k]
+            val = nutrition.get(k)
+            if isinstance(val, (int, float)):
+                totals[k] += val * food["quantity"]
 
-    for k in totals:
-        if not totals_available[k]:
-            totals[k] = "Not Available"
+        results.append({
+            "food": food["food"],
+            "quantity": food["quantity"],
+            "nutrition": nutrition
+        })
 
     return results, totals
-
-async def process_foods(request, foods, transcript=None):
-    results, totals = await compute_results_and_totals(foods)
-
-    return templates.TemplateResponse(
-        request,
-        "front_end.html",
-        {
-            "request": request,
-            "results": results,
-            "totals": totals,
-            "transcript": transcript
-        }
-    )
