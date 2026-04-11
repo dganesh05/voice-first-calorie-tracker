@@ -33,16 +33,16 @@ Implement a layered, zero-cost security foundation using Supabase Auth + RLS, ba
 28. Add incident playbook notes (key compromise, forced logout, token revocation, suspicious traffic response).
 
 **Relevant files**
-- /home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker/main.py — add auth dependency, token verification, input validation, rate limits, safer error handling, CORS tightening.
-- /home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker/supabase_client.py — separate admin client usage and add safer initialization/validation.
-- /home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker/app/login/page.tsx — wire real sign-in actions and OAuth start.
-- /home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker/app/signup/page.tsx — wire real sign-up actions and post-signup verification UX.
-- /home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker/app/logger/page.tsx — include authenticated API calls with bearer token and auth-aware states.
-- /home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker/app/journal/page.tsx — protect page and load only authenticated user data.
-- /home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker/app/profile/page.tsx — protect page and bind updates to current user identity.
-- /home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker/README.md — add security setup and rotation guidance.
-- /home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker/requirements.txt — add auth/jwt/rate-limit/validation dependencies.
-- /home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker/.env.example — add non-secret template and variable documentation.
+- /voice-first-calorie-tracker/main.py — add auth dependency, token verification, input validation, rate limits, safer error handling, CORS tightening.
+- /voice-first-calorie-tracker/supabase_client.py — separate admin client usage and add safer initialization/validation.
+- /voice-first-calorie-tracker/app/login/page.tsx — wire real sign-in actions and OAuth start.
+- /voice-first-calorie-tracker/app/signup/page.tsx — wire real sign-up actions and post-signup verification UX.
+- /voice-first-calorie-tracker/app/logger/page.tsx — include authenticated API calls with bearer token and auth-aware states.
+- /voice-first-calorie-tracker/app/journal/page.tsx — protect page and load only authenticated user data.
+- /voice-first-calorie-tracker/app/profile/page.tsx — protect page and bind updates to current user identity.
+- /voice-first-calorie-tracker/README.md — add security setup and rotation guidance.
+- /voice-first-calorie-tracker/requirements.txt — add auth/jwt/rate-limit/validation dependencies.
+- /voice-first-calorie-tracker/.env.example — add non-secret template and variable documentation.
 
 **Verification**
 1. Auth flow checks: sign up, email login, Google login, logout, session refresh, and protected route redirect behavior.
