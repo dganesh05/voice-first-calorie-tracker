@@ -14,7 +14,7 @@ export default function SignupPage() {
         <div className="w-full max-w-md rounded-[32px] bg-white/5 p-8 ring-1 ring-white/10 backdrop-blur">
           <div className="flex flex-col items-center text-center">
             <Image
-              src="/vocalorie-icon.png"
+              src="/vocalorie-icon.PNG"
               alt="Vocalorie"
               width={150}
               height={150}

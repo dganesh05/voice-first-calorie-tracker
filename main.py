@@ -7,6 +7,7 @@ import json
 import re
 
 from fastapi import FastAPI, Request, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -14,6 +15,23 @@ from tavily import TavilyClient
 from openai import OpenAI
 
 app = FastAPI()
+
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    ).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ------------------ API KEYS ------------------
 
@@ -153,11 +171,22 @@ PARSING RULES
   "scrambled eggs" → "egg"
   "a glass of milk" → "milk"
 
-4. DISH PRESERVATION
+4. BRAND-ONLY FOOD MENTIONS (QUALITY CONTROL)
+- If the user says only a brand name, map it to the most common primary food that people eat for that brand.
+- Prefer the core meal item, NOT side products, flavor sachets, seasoning packets, oils, or sauces unless those are explicitly spoken.
+- Keep this rule generalizable across brands:
+    - "Maggi" → "instant noodles"
+    - "Nutella" → "hazelnut spread"
+    - "Oreo" → "oreo cookie"
+- If brand + product type is provided, preserve it directly:
+    - "Maggi noodles" → "maggi noodles"
+    - "Coca-Cola" → "coke"
+
+5. DISH PRESERVATION
 - Keep full dish description intact
 - Do NOT split ingredients inside a dish
 
-5. IGNORE FILLER TEXT
+6. IGNORE FILLER TEXT
 Ignore:
 "I had", "for lunch", "today", etc.
 
@@ -237,6 +266,46 @@ Output:
 
 ---
 
+Input: "I ate Maggi"
+Output:
+[
+    {"food": "instant noodles", "quantity": 1}
+]
+
+---
+
+Input: "I ate Maggi noodles"
+Output:
+[
+    {"food": "maggi noodles", "quantity": 1}
+]
+
+---
+
+Input: "I had Yippee"
+Output:
+[
+    {"food": "instant noodles", "quantity": 1}
+]
+
+---
+
+Input: "I ate Top Ramen"
+Output:
+[
+    {"food": "instant noodles", "quantity": 1}
+]
+
+---
+
+Input: "I drank Frooti"
+Output:
+[
+    {"food": "mango drink", "quantity": 1}
+]
+
+---
+
 Input: "I had pasta and later drank milk"
 Output:
 [
@@ -257,13 +326,24 @@ NO extra text.
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("front_end.html", {"request": request})
+    return templates.TemplateResponse(request, "front_end.html", {"request": request})
 
 @app.get("/foods/search", response_class=HTMLResponse)
 async def usda_api(request: Request, query: str):
     query = clean_voice_input(query)
     foods = await extract_foods_with_ai(query)
     return await process_foods(request, foods)
+
+@app.get("/api/foods/search")
+async def usda_api_json(query: str):
+    query = clean_voice_input(query)
+    foods = await extract_foods_with_ai(query)
+    results, totals = await compute_results_and_totals(foods)
+    return {
+        "query": query,
+        "results": results,
+        "totals": totals,
+    }
 
 @app.post("/voice")
 async def voice_input(request: Request, file: UploadFile = File(...)):
@@ -275,6 +355,23 @@ async def voice_input(request: Request, file: UploadFile = File(...)):
     foods = await extract_foods_with_ai(cleaned_query)
 
     return await process_foods(request, foods, transcript=transcript)
+
+@app.post("/api/voice")
+async def voice_input_json(file: UploadFile = File(...)):
+    transcript = await transcribe_audio(file)
+    if not transcript:
+        return {"error": "Transcription failed"}
+
+    cleaned_query = clean_voice_input(normalize_transcript(transcript))
+    foods = await extract_foods_with_ai(cleaned_query)
+    results, totals = await compute_results_and_totals(foods)
+
+    return {
+        "transcript": transcript,
+        "query": cleaned_query,
+        "results": results,
+        "totals": totals,
+    }
 
 # ------------------ CLEAN INPUT ------------------
 
@@ -293,8 +390,10 @@ def normalize_transcript(text: str):
 async def transcribe_audio(file):
     try:
         audio_bytes = await file.read()
+        filename = file.filename or "audio.webm"
+        content_type = file.content_type or "application/octet-stream"
         response = stt_client.audio.transcriptions.create(
-            file=("audio.wav", audio_bytes),
+            file=(filename, audio_bytes, content_type),
             model="whisper-large-v3-turbo"
         )
         return response.text
@@ -408,11 +507,15 @@ async def fetch_usda(food_name: str):
             if n.get("nutrientName") in lookup:
                 nutrition[lookup[n["nutrientName"]]] = n.get("value", "Not Available")
 
-        return nutrition
+        return {
+            "nutrition": nutrition,
+            "source": "USDA FoodData Central",
+            "source_item": selected.get("description") or food_name,
+        }
 
 # ------------------ PROCESS ------------------
 
-async def process_foods(request, foods, transcript=None):
+async def compute_results_and_totals(foods):
     results = []
     totals = {
         "calories": 0,
@@ -427,7 +530,10 @@ async def process_foods(request, foods, transcript=None):
     totals_available = {k: False for k in totals}
 
     for food in foods:
-        nutrition = await fetch_usda(food["food"]) or {k: "Not Available" for k in totals}
+        resolved = await fetch_usda(food["food"])
+        nutrition = resolved["nutrition"] if resolved else {k: "Not Available" for k in totals}
+        source = resolved["source"] if resolved else "Not Available"
+        source_item = resolved["source_item"] if resolved else food["food"]
 
         for k in nutrition:
             if isinstance(nutrition[k], (int, float)):
@@ -438,6 +544,8 @@ async def process_foods(request, foods, transcript=None):
 
         results.append({
             "food": f"{food['quantity']} x {food['food']}",
+            "source": source,
+            "source_item": source_item,
             **nutrition
         })
 
@@ -449,7 +557,13 @@ async def process_foods(request, foods, transcript=None):
         if not totals_available[k]:
             totals[k] = "Not Available"
 
+    return results, totals
+
+async def process_foods(request, foods, transcript=None):
+    results, totals = await compute_results_and_totals(foods)
+
     return templates.TemplateResponse(
+        request,
         "front_end.html",
         {
             "request": request,

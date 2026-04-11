@@ -1,36 +1,146 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Voice-First Calorie Tracker
 
-## Getting Started
+This project has:
+- A FastAPI backend (food parsing, transcription, nutrition lookup)
+- A Next.js frontend (logger, journal, profile UI)
 
-First, run the development server:
+## Quick Start (Copy-Paste)
+
+### 1) Add `.env` File
+
+Run this once from the project root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cat > .env << 'EOF'
+USDA_API_KEY=your_usda_key
+GROQ_API_KEY=your_groq_key
+TAVILY_API_KEY=your_tavily_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+EOF
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2) Terminal 1 (Backend)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cd "/home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 3) Terminal 2 (Frontend)
 
-## Learn More
+```bash
+cd "/home/divya_ganesh/projects/Software engineering/NEW FOLDER/voice-first-calorie-tracker"
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+### 4) Run Everything
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Backend: http://localhost:8000
+- Frontend: http://localhost:3000
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Prerequisites
 
-## Deploy on Vercel
+- Python 3.11+
+- Node.js 18+
+- npm
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 1) Clone and Enter Project
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+git clone <your-repo-url>
+cd voice-first-calorie-tracker
+```
+
+## 2) Set Up Environment Variables
+
+Create a `.env` file in the project root:
+
+```env
+# Required for backend startup/food lookups
+USDA_API_KEY=your_usda_key
+
+# Required for parser + transcription
+GROQ_API_KEY=your_groq_key
+
+# Optional unless using Tavily workflows
+TAVILY_API_KEY=your_tavily_key
+
+# Optional unless using Supabase integration
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+
+# Optional CORS override (comma-separated)
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+# Frontend -> backend URL
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+```
+
+## 3) Set Up Python Backend
+
+Create and activate a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install backend dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Run backend (FastAPI + Uvicorn):
+
+```bash
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Backend URL:
+- http://localhost:8000
+
+## 4) Set Up Next.js Frontend
+
+In a second terminal, from the same project folder:
+
+```bash
+npm install
+npm run dev
+```
+
+Frontend URL:
+- http://localhost:3000
+
+## 5) Development Workflow
+
+Run both servers at the same time:
+- Terminal 1: backend on port 8000
+- Terminal 2: frontend on port 3000
+
+The logger page calls backend endpoints such as:
+- `GET /api/foods/search`
+- `POST /api/voice`
+
+## Troubleshooting
+
+- `No module named uvicorn`
+	- Activate `.venv` and reinstall requirements:
+	- `source .venv/bin/activate && pip install -r requirements.txt`
+
+- Frontend cannot reach backend
+	- Check `NEXT_PUBLIC_API_BASE_URL` in `.env`
+	- Confirm backend is running on port 8000
+
+- CORS issues from frontend
+	- Add your frontend origin to `ALLOWED_ORIGINS`
+
+- Image assets not loading on Linux
+	- Filenames in `public/` are case-sensitive (for example `.PNG` vs `.png`)

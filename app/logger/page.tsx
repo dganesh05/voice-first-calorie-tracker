@@ -2,35 +2,214 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+type NutritionTotals = {
+  calories: number | string;
+  protein_g: number | string;
+  carbs_g: number | string;
+  fat_g: number | string;
+  sugar_g: number | string;
+  fiber_g: number | string;
+  vitamin_d_mcg: number | string;
+};
+
+type SearchResultItem = {
+  food: string;
+  source?: string;
+  source_item?: string;
+} & NutritionTotals;
+
+type SearchResponse = {
+  query: string;
+  results: SearchResultItem[];
+  totals: NutritionTotals;
+};
+
+type VoiceResponse = SearchResponse & {
+  transcript: string;
+};
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export default function LoggerPage() {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [apiData, setApiData] = useState<SearchResponse | null>(null);
+  const [error, setError] = useState("");
+  const [selectedFood, setSelectedFood] = useState<SearchResultItem | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
-  const transcript =
-    "I had grilled chicken breast, white rice, and a protein shake.";
-  const estimatedCalories = "720 kcal";
-  const protein = "58g";
-  const carbs = "62g";
-  const fats = "18g";
+  const supportsSpeechRecognition =
+    typeof window !== "undefined" &&
+    ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
 
-  const handleMicClick = () => {
-    if (isProcessing) return;
+  const fetchByQuery = async (queryText: string) => {
+    const response = await fetch(
+      `${API_BASE_URL}/api/foods/search?query=${encodeURIComponent(queryText)}`
+    );
 
-    if (!isListening) {
-      setIsListening(true);
+    if (!response.ok) {
+      throw new Error(`Backend request failed: ${response.status}`);
+    }
 
-      setTimeout(() => {
+    const data: SearchResponse = await response.json();
+    setApiData(data);
+  };
+
+  const uploadRecordedAudio = async (blob: Blob) => {
+    const formData = new FormData();
+    const extension = blob.type.includes("ogg") ? "ogg" : "webm";
+    formData.append("file", blob, `meal.${extension}`);
+
+    const response = await fetch(`${API_BASE_URL}/api/voice`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Voice upload failed: ${response.status}`);
+    }
+
+    const data: VoiceResponse = await response.json();
+    setTranscript(data.transcript || "");
+    setApiData({ query: data.query, results: data.results, totals: data.totals });
+  };
+
+  const startMediaRecorderFallback = async () => {
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      setError("This browser does not support audio recording.");
+      return;
+    }
+
+    setError("");
+    setIsListening(true);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const candidates = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/webm"];
+      const mimeType = candidates.find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      const chunks: BlobPart[] = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+
+      recorder.onerror = () => {
+        setError("Audio recording failed.");
+      };
+
+      recorder.onstop = async () => {
         setIsListening(false);
         setIsProcessing(true);
 
-        setTimeout(() => {
+        try {
+          const recordedBlob = new Blob(chunks, {
+            type: recorder.mimeType || "audio/webm",
+          });
+          await uploadRecordedAudio(recordedBlob);
+        } catch (requestError: any) {
+          setError(requestError.message ?? "Failed to transcribe audio.");
+        } finally {
           setIsProcessing(false);
-        }, 1800);
-      }, 2200);
+          mediaRecorderRef.current = null;
+          stream.getTracks().forEach((track) => track.stop());
+        }
+      };
+
+      recorder.start();
+    } catch {
+      setIsListening(false);
+      setError("Microphone access was denied or unavailable.");
     }
   };
+
+  const handleMicClick = async () => {
+    if (isProcessing) {
+      return;
+    }
+
+    if (!supportsSpeechRecognition && mediaRecorderRef.current && isListening) {
+      mediaRecorderRef.current.stop();
+      return;
+    }
+
+    const SpeechRecognitionConstructor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognitionConstructor) {
+      await startMediaRecorderFallback();
+      return;
+    }
+
+    setError("");
+    setIsListening(true);
+    const recognition = new SpeechRecognitionConstructor();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+
+    let finalTranscript = "";
+
+    recognition.onresult = (event: any) => {
+      finalTranscript = event.results[0][0].transcript;
+      setTranscript(finalTranscript);
+    };
+
+    recognition.onerror = (event: any) => {
+      setError(`Speech error: ${event.error}`);
+      setIsListening(false);
+    };
+
+    recognition.onend = async () => {
+      setIsListening(false);
+
+      if (!finalTranscript.trim()) {
+        return;
+      }
+
+      setIsProcessing(true);
+      try {
+        await fetchByQuery(finalTranscript);
+      } catch (requestError: any) {
+        setError(requestError.message ?? "Failed to fetch nutrition data.");
+      } finally {
+        setIsProcessing(false);
+      }
+    };
+
+    recognition.start();
+  };
+
+  const formatValue = (value: number | string, suffix = "") => {
+    if (typeof value === "number") {
+      return `${Math.round(value * 100) / 100}${suffix}`;
+    }
+
+    return value;
+  };
+
+  const estimatedCalories = apiData
+    ? formatValue(apiData.totals.calories, " kcal")
+    : "--";
+  const protein = apiData ? formatValue(apiData.totals.protein_g, "g") : "--";
+  const carbs = apiData ? formatValue(apiData.totals.carbs_g, "g") : "--";
+  const fats = apiData ? formatValue(apiData.totals.fat_g, "g") : "--";
+
+  const closeFoodPopup = () => setSelectedFood(null);
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-gradient-to-b from-[#0b1220] via-[#0b1220] to-[#07121a] text-white">
@@ -45,7 +224,7 @@ export default function LoggerPage() {
       <header className="relative z-20 mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
         <Link href="/" className="flex items-center gap-3">
           <Image
-            src="/vocalorie-icon.png"
+            src="/vocalorie-icon.PNG"
             alt="Vocalorie"
             width={150}
             height={150}
@@ -140,7 +319,7 @@ export default function LoggerPage() {
                 }`}
               >
                 <Image
-                  src="/vocalorie-mic.png"
+                  src="/vocalorie-mic.PNG"
                   alt="Vocalorie Mic"
                   width={90}
                   height={90}
@@ -152,6 +331,16 @@ export default function LoggerPage() {
             </div>
 
             <div className="mt-8 text-center">
+              {error && (
+                <p className="mb-4 text-sm font-medium text-red-300">{error}</p>
+              )}
+
+              {!supportsSpeechRecognition && (
+                <p className="mb-3 text-xs text-white/60">
+                  Firefox mode: tap once to record, tap again to stop and transcribe.
+                </p>
+              )}
+
               {!isListening && !isProcessing && (
                 <>
                   <p className="text-lg font-medium text-white">
@@ -208,7 +397,7 @@ export default function LoggerPage() {
                   </h2>
                 </div>
                 <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs text-emerald-200 ring-1 ring-emerald-500/20">
-                  AI generated
+                  {apiData ? "Live backend" : "Awaiting input"}
                 </span>
               </div>
 
@@ -248,10 +437,53 @@ export default function LoggerPage() {
                   Detected foods
                 </p>
                 <div className="mt-4 flex flex-wrap gap-3">
-                  <FoodPill label="Grilled chicken breast" />
-                  <FoodPill label="White rice" />
-                  <FoodPill label="Protein shake" />
+                  {apiData && apiData.results.length > 0 ? (
+                    apiData.results.map((item, index) => (
+                      <FoodPill
+                        key={`${item.food}-${index}`}
+                        label={item.food}
+                        onClick={() => setSelectedFood(item)}
+                      />
+                    ))
+                  ) : (
+                    <span className="text-sm text-white/60">
+                      Speak a meal to populate this list.
+                    </span>
+                  )}
                 </div>
+
+                {selectedFood && (
+                  <div className="mt-4 rounded-2xl bg-[#0f1a25] p-4 ring-1 ring-emerald-400/30">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm text-white/60">Selected food</p>
+                        <p className="text-base font-semibold text-white">{selectedFood.food}</p>
+                      </div>
+                      <button
+                        onClick={closeFoodPopup}
+                        className="rounded-lg bg-white/10 px-2 py-1 text-xs text-white/80 ring-1 ring-white/15 hover:bg-white/15"
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    <p className="mt-3 text-xs text-white/60">
+                      Source: {selectedFood.source || "Not Available"}
+                    </p>
+                    <p className="mt-1 text-xs text-white/60">
+                      Resolver item: {selectedFood.source_item || "Not Available"}
+                    </p>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-white/80">
+                      <NutritionCell label="Calories" value={selectedFood.calories} />
+                      <NutritionCell label="Protein" value={selectedFood.protein_g} suffix="g" />
+                      <NutritionCell label="Carbs" value={selectedFood.carbs_g} suffix="g" />
+                      <NutritionCell label="Fat" value={selectedFood.fat_g} suffix="g" />
+                      <NutritionCell label="Sugar" value={selectedFood.sugar_g} suffix="g" />
+                      <NutritionCell label="Fiber" value={selectedFood.fiber_g} suffix="g" />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="mt-6 flex gap-4">
@@ -294,10 +526,33 @@ function MacroCard({
   );
 }
 
-function FoodPill({ label }: { label: string }) {
+function FoodPill({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <span className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/80 ring-1 ring-white/10">
+    <button
+      onClick={onClick}
+      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/80 ring-1 ring-white/10 transition hover:bg-white/20"
+    >
       {label}
-    </span>
+    </button>
+  );
+}
+
+function NutritionCell({
+  label,
+  value,
+  suffix = "",
+}: {
+  label: string;
+  value: number | string;
+  suffix?: string;
+}) {
+  const displayValue =
+    typeof value === "number" ? `${Math.round(value * 100) / 100}${suffix}` : value;
+
+  return (
+    <div className="rounded-xl bg-black/20 px-3 py-2 ring-1 ring-white/10">
+      <p className="text-[11px] uppercase tracking-wide text-white/50">{label}</p>
+      <p className="mt-1 text-sm font-medium text-white">{displayValue}</p>
+    </div>
   );
 }
