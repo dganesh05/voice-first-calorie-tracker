@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import AuthNavActions from "../../components/AuthNavActions";
 
 import { requireAccessTokenOrRedirect } from "../../lib/auth";
 
@@ -31,6 +32,23 @@ type SearchResponse = {
 
 type VoiceResponse = SearchResponse & {
   transcript: string;
+};
+
+type EditableFoodDraft = {
+  food: string;
+  quantity: string;
+  calories: string;
+  protein_g: string;
+  carbs_g: string;
+  fat_g: string;
+};
+
+type CustomFoodDraft = {
+  food_name: string;
+  calories: string;
+  protein: string;
+  carbs: string;
+  fat: string;
 };
 
 type BrowserSpeechRecognitionResultEvent = {
@@ -74,6 +92,14 @@ function parseLoggedFoodLabel(label: string): { quantity: number; foodName: stri
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+const EMPTY_CUSTOM_FOOD_DRAFT: CustomFoodDraft = {
+  food_name: "",
+  calories: "",
+  protein: "",
+  carbs: "",
+  fat: "",
+};
+
 export default function LoggerPage() {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -83,6 +109,13 @@ export default function LoggerPage() {
   const [statusMessage, setStatusMessage] = useState("");
   const [isLogging, setIsLogging] = useState(false);
   const [selectedFoodIndex, setSelectedFoodIndex] = useState(0);
+  const [isEditingMeal, setIsEditingMeal] = useState(false);
+  const [editableFoodDraft, setEditableFoodDraft] = useState<EditableFoodDraft | null>(null);
+  const [isCustomFoodModalOpen, setIsCustomFoodModalOpen] = useState(false);
+  const [isSavingCustomFood, setIsSavingCustomFood] = useState(false);
+  const [customFoodDraft, setCustomFoodDraft] = useState<CustomFoodDraft>(EMPTY_CUSTOM_FOOD_DRAFT);
+  const [customFoodError, setCustomFoodError] = useState("");
+  const [customFoodSuccessMessage, setCustomFoodSuccessMessage] = useState("");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -90,6 +123,24 @@ export default function LoggerPage() {
   useEffect(() => {
     requireAccessTokenOrRedirect();
   }, []);
+
+  useEffect(() => {
+    if (!apiData || apiData.results.length === 0) {
+      setSelectedFoodIndex(0);
+      setIsEditingMeal(false);
+      setEditableFoodDraft(null);
+      return;
+    }
+
+    const nextIndex = Math.min(selectedFoodIndex, apiData.results.length - 1);
+    if (nextIndex !== selectedFoodIndex) {
+      setSelectedFoodIndex(nextIndex);
+    }
+
+    if (isEditingMeal) {
+      setEditableFoodDraft(buildEditableFoodDraft(apiData.results[nextIndex]));
+    }
+  }, [apiData, isEditingMeal, selectedFoodIndex]);
 
   const supportsSpeechRecognition =
     typeof window !== "undefined" &&
@@ -145,6 +196,8 @@ export default function LoggerPage() {
     setTranscript(data.transcript || "");
     setApiData({ query: data.query, results: data.results, totals: data.totals });
     setSelectedFoodIndex(0);
+    setIsEditingMeal(false);
+    setEditableFoodDraft(null);
     setStatusMessage("");
   };
 
@@ -334,6 +387,123 @@ export default function LoggerPage() {
   const foods = apiData ? apiData.results : [];
   const selectedFood = foods[selectedFoodIndex] ?? null;
 
+  const startEditingSelectedFood = () => {
+    if (!selectedFood) {
+      return;
+    }
+
+    setEditableFoodDraft(buildEditableFoodDraft(selectedFood));
+    setIsEditingMeal(true);
+  };
+
+  const cancelEditingMeal = () => {
+    setIsEditingMeal(false);
+    setEditableFoodDraft(selectedFood ? buildEditableFoodDraft(selectedFood) : null);
+  };
+
+  const handleSaveEditedMeal = () => {
+    if (!apiData || !selectedFood || !editableFoodDraft) {
+      return;
+    }
+
+    const parsedQuantity = Number.parseFloat(editableFoodDraft.quantity);
+    const parsedCalories = Number.parseFloat(editableFoodDraft.calories);
+    const parsedProtein = Number.parseFloat(editableFoodDraft.protein_g);
+    const parsedCarbs = Number.parseFloat(editableFoodDraft.carbs_g);
+    const parsedFat = Number.parseFloat(editableFoodDraft.fat_g);
+
+    const updatedFood: SearchResultItem = {
+      ...selectedFood,
+      food: editableFoodDraft.food.trim() || selectedFood.food,
+      quantity: Number.isFinite(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : selectedFood.quantity,
+      calories: Number.isFinite(parsedCalories) ? parsedCalories : selectedFood.calories,
+      protein_g: Number.isFinite(parsedProtein) ? parsedProtein : selectedFood.protein_g,
+      carbs_g: Number.isFinite(parsedCarbs) ? parsedCarbs : selectedFood.carbs_g,
+      fat_g: Number.isFinite(parsedFat) ? parsedFat : selectedFood.fat_g,
+    };
+
+    const nextResults = apiData.results.map((item, index) =>
+      index === selectedFoodIndex ? updatedFood : item
+    );
+
+    setApiData({
+      ...apiData,
+      results: nextResults,
+      totals: recalculateTotals(nextResults),
+    });
+    setIsEditingMeal(false);
+    setEditableFoodDraft(buildEditableFoodDraft(updatedFood));
+  };
+
+  const openCustomFoodModal = () => {
+    setCustomFoodError("");
+    setCustomFoodSuccessMessage("");
+    setIsCustomFoodModalOpen(true);
+  };
+
+  const closeCustomFoodModal = () => {
+    setIsCustomFoodModalOpen(false);
+    setCustomFoodError("");
+    setCustomFoodSuccessMessage("");
+    setCustomFoodDraft(EMPTY_CUSTOM_FOOD_DRAFT);
+  };
+
+  const handleSaveCustomFood = async () => {
+    if (isSavingCustomFood) {
+      return;
+    }
+
+    const foodName = customFoodDraft.food_name.trim();
+    if (!foodName) {
+      setCustomFoodError("Food name is required.");
+      setCustomFoodSuccessMessage("");
+      return;
+    }
+
+    const parseNonNegative = (value: string) => {
+      const parsed = Number.parseFloat(value);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    };
+
+    setIsSavingCustomFood(true);
+    setCustomFoodError("");
+    setCustomFoodSuccessMessage("");
+
+    try {
+      const accessToken = await requireAccessTokenOrRedirect();
+      if (!accessToken) {
+        throw new Error("Your session has expired. Please sign in again.");
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/personal-foods`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          food_name: foodName,
+          calories: parseNonNegative(customFoodDraft.calories),
+          protein: parseNonNegative(customFoodDraft.protein),
+          carbs: parseNonNegative(customFoodDraft.carbs),
+          fat: parseNonNegative(customFoodDraft.fat),
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail ?? `Failed to save custom food (${response.status})`);
+      }
+
+      setCustomFoodDraft(EMPTY_CUSTOM_FOOD_DRAFT);
+      setCustomFoodSuccessMessage("Saved. Add another food or close.");
+    } catch (saveError: unknown) {
+      setCustomFoodError(getErrorMessage(saveError, "Failed to save custom food."));
+    } finally {
+      setIsSavingCustomFood(false);
+    }
+  };
+
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-gradient-to-b from-[#0b1220] via-[#0b1220] to-[#07121a] text-white">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -374,12 +544,10 @@ export default function LoggerPage() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/login"
-            className="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
-          >
-            Sign in
-          </Link>
+          <AuthNavActions
+            signInClassName="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
+            signOutClassName="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
+          />
         </div>
       </header>
 
@@ -557,55 +725,179 @@ export default function LoggerPage() {
 
                 {selectedFood ? (
                   <div className="mt-5 rounded-3xl bg-white/5 p-5 ring-1 ring-white/10">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-white/45">
-                          Selected food
-                        </p>
-                        <h3 className="mt-1 text-xl font-semibold text-white">
-                          {formatQuantityLabel(selectedFood)}
-                        </h3>
-                        {selectedFood.source_item ? (
-                          <p className="mt-1 text-sm text-white/55">
-                            Resolver item: {selectedFood.source_item}
-                          </p>
-                        ) : null}
+                    {!isEditingMeal ? (
+                      <>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-white/45">
+                              Selected food
+                            </p>
+                            <h3 className="mt-1 text-xl font-semibold text-white">
+                              {formatQuantityLabel(selectedFood)}
+                            </h3>
+                            {selectedFood.source_item ? (
+                              <p className="mt-1 text-sm text-white/55">
+                                Resolver item: {selectedFood.source_item}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          <div className="rounded-2xl bg-black/20 px-4 py-3 ring-1 ring-white/10">
+                            <p className="text-xs uppercase tracking-wide text-white/45">
+                              Source
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-emerald-200">
+                              {selectedFood.source ?? "Resolver"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+                          <MacroCard label="Calories" value={formatValue(selectedFood.calories, " kcal")} />
+                          <MacroCard label="Protein" value={formatValue(selectedFood.protein_g, "g")} />
+                          <MacroCard label="Carbs" value={formatValue(selectedFood.carbs_g, "g")} />
+                          <MacroCard label="Fat" value={formatValue(selectedFood.fat_g, "g")} />
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-3 gap-3 text-sm text-white/70">
+                          <DetailStat label="Sugar" value={formatValue(selectedFood.sugar_g, "g")} />
+                          <DetailStat label="Fiber" value={formatValue(selectedFood.fiber_g, "g")} />
+                          <DetailStat label="Vitamin D" value={formatValue(selectedFood.vitamin_d_mcg, "mcg")} />
+                        </div>
+                      </>
+                    ) : editableFoodDraft ? (
+                      <div className="space-y-4">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-white/45">
+                              Editing meal
+                            </p>
+                            <p className="mt-1 text-sm text-white/55">
+                              Correct the parts the voice got wrong before logging.
+                            </p>
+                          </div>
+
+                          <div className="rounded-2xl bg-black/20 px-4 py-3 ring-1 ring-white/10">
+                            <p className="text-xs uppercase tracking-wide text-white/45">
+                              Source
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-emerald-200">
+                              {selectedFood.source ?? "Resolver"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <FieldInput
+                            label="Food name"
+                            value={editableFoodDraft.food}
+                            onChange={(value) =>
+                              setEditableFoodDraft((current) =>
+                                current ? { ...current, food: value } : current
+                              )
+                            }
+                            placeholder="Meal or food name"
+                          />
+                          <FieldInput
+                            label="Quantity"
+                            value={editableFoodDraft.quantity}
+                            onChange={(value) =>
+                              setEditableFoodDraft((current) =>
+                                current ? { ...current, quantity: value } : current
+                              )
+                            }
+                            placeholder="1"
+                            inputMode="decimal"
+                          />
+                          <FieldInput
+                            label="Calories"
+                            value={editableFoodDraft.calories}
+                            onChange={(value) =>
+                              setEditableFoodDraft((current) =>
+                                current ? { ...current, calories: value } : current
+                              )
+                            }
+                            placeholder="154"
+                            inputMode="decimal"
+                          />
+                          <FieldInput
+                            label="Protein (g)"
+                            value={editableFoodDraft.protein_g}
+                            onChange={(value) =>
+                              setEditableFoodDraft((current) =>
+                                current ? { ...current, protein_g: value } : current
+                              )
+                            }
+                            placeholder="10.6"
+                            inputMode="decimal"
+                          />
+                          <FieldInput
+                            label="Carbs (g)"
+                            value={editableFoodDraft.carbs_g}
+                            onChange={(value) =>
+                              setEditableFoodDraft((current) =>
+                                current ? { ...current, carbs_g: value } : current
+                              )
+                            }
+                            placeholder="0.64"
+                            inputMode="decimal"
+                          />
+                          <FieldInput
+                            label="Fat (g)"
+                            value={editableFoodDraft.fat_g}
+                            onChange={(value) =>
+                              setEditableFoodDraft((current) =>
+                                current ? { ...current, fat_g: value } : current
+                              )
+                            }
+                            placeholder="11.7"
+                            inputMode="decimal"
+                          />
+                        </div>
+
+                        <div className="mt-2 flex gap-3">
+                          <button
+                            type="button"
+                            onClick={handleSaveEditedMeal}
+                            className="flex-1 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-[#08131a] transition hover:bg-emerald-400"
+                          >
+                            Save edits
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEditingMeal}
+                            className="flex-1 rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
-
-                      <div className="rounded-2xl bg-black/20 px-4 py-3 ring-1 ring-white/10">
-                        <p className="text-xs uppercase tracking-wide text-white/45">
-                          Source
-                        </p>
-                        <p className="mt-1 text-sm font-medium text-emerald-200">
-                          {selectedFood.source ?? "Resolver"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-                      <MacroCard label="Calories" value={formatValue(selectedFood.calories, " kcal")} />
-                      <MacroCard label="Protein" value={formatValue(selectedFood.protein_g, "g")} />
-                      <MacroCard label="Carbs" value={formatValue(selectedFood.carbs_g, "g")} />
-                      <MacroCard label="Fat" value={formatValue(selectedFood.fat_g, "g")} />
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-3 gap-3 text-sm text-white/70">
-                      <DetailStat label="Sugar" value={formatValue(selectedFood.sugar_g, "g")} />
-                      <DetailStat label="Fiber" value={formatValue(selectedFood.fiber_g, "g")} />
-                      <DetailStat label="Vitamin D" value={formatValue(selectedFood.vitamin_d_mcg, "mcg")} />
-                    </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
 
-              <div className="mt-6 flex gap-4">
-                <button className="flex-1 rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15">
+              <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={startEditingSelectedFood}
+                  disabled={!selectedFood}
+                  className="rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   Edit meal
                 </button>
                 <button
+                  type="button"
+                  onClick={openCustomFoodModal}
+                  className="rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                >
+                  Add custom food
+                </button>
+                <button
+                  type="button"
                   onClick={handleConfirmLog}
                   disabled={!apiData || apiData.results.length === 0 || isLogging}
-                  className="flex-1 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-[#08131a] transition hover:bg-emerald-400 disabled:opacity-60"
+                  className="rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-[#08131a] transition hover:bg-emerald-400 disabled:opacity-60"
                 >
                   {isLogging ? "Logging..." : "Confirm & Log"}
                 </button>
@@ -623,6 +915,98 @@ export default function LoggerPage() {
           </div>
         </div>
       </section>
+
+      {isCustomFoodModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4">
+          <div className="w-full max-w-md rounded-3xl bg-[#0d1823] p-5 ring-1 ring-white/15 backdrop-blur">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm text-white/60">Personal foods</p>
+                <h2 className="mt-1 text-xl font-semibold text-white">Add custom food</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeCustomFoodModal}
+                className="rounded-full bg-white/10 px-3 py-1 text-xs text-white ring-1 ring-white/15 hover:bg-white/15"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-3">
+              <FieldInput
+                label="Food name"
+                value={customFoodDraft.food_name}
+                onChange={(value) =>
+                  setCustomFoodDraft((current) => ({ ...current, food_name: value }))
+                }
+                placeholder="Homemade oats"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <FieldInput
+                  label="Calories"
+                  value={customFoodDraft.calories}
+                  onChange={(value) =>
+                    setCustomFoodDraft((current) => ({ ...current, calories: value }))
+                  }
+                  placeholder="320"
+                  inputMode="decimal"
+                />
+                <FieldInput
+                  label="Protein (g)"
+                  value={customFoodDraft.protein}
+                  onChange={(value) =>
+                    setCustomFoodDraft((current) => ({ ...current, protein: value }))
+                  }
+                  placeholder="14"
+                  inputMode="decimal"
+                />
+                <FieldInput
+                  label="Carbs (g)"
+                  value={customFoodDraft.carbs}
+                  onChange={(value) =>
+                    setCustomFoodDraft((current) => ({ ...current, carbs: value }))
+                  }
+                  placeholder="42"
+                  inputMode="decimal"
+                />
+                <FieldInput
+                  label="Fat (g)"
+                  value={customFoodDraft.fat}
+                  onChange={(value) =>
+                    setCustomFoodDraft((current) => ({ ...current, fat: value }))
+                  }
+                  placeholder="9"
+                  inputMode="decimal"
+                />
+              </div>
+            </div>
+
+            {customFoodError ? <p className="mt-4 text-sm text-red-300">{customFoodError}</p> : null}
+            {customFoodSuccessMessage ? (
+              <p className="mt-4 text-sm text-emerald-300">{customFoodSuccessMessage}</p>
+            ) : null}
+
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={handleSaveCustomFood}
+                disabled={isSavingCustomFood}
+                className="flex-1 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-[#08131a] transition hover:bg-emerald-400 disabled:opacity-60"
+              >
+                {isSavingCustomFood ? "Saving..." : "Save food"}
+              </button>
+              <button
+                type="button"
+                onClick={closeCustomFoodModal}
+                className="flex-1 rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -643,6 +1027,78 @@ function DetailStat({ label, value }: { label: string; value: string | number })
       <p className="mt-1 text-sm font-semibold text-white">{value}</p>
     </div>
   );
+}
+
+function FieldInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  inputMode,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  inputMode?: "text" | "decimal" | "numeric";
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="block text-xs uppercase tracking-wide text-white/45">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        inputMode={inputMode}
+        className="w-full rounded-xl bg-white/10 px-3 py-3 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-emerald-400/40"
+      />
+    </label>
+  );
+}
+
+function buildEditableFoodDraft(food: SearchResultItem): EditableFoodDraft {
+  return {
+    food: food.food,
+    quantity: String(typeof food.quantity === "number" && food.quantity > 0 ? food.quantity : 1),
+    calories: String(food.calories),
+    protein_g: String(food.protein_g),
+    carbs_g: String(food.carbs_g),
+    fat_g: String(food.fat_g),
+  };
+}
+
+function recalculateTotals(results: SearchResultItem[]): NutritionTotals {
+  return results.reduce<NutritionTotals>(
+    (totals, item) => ({
+      calories: addNutritionValue(totals.calories, item.calories),
+      protein_g: addNutritionValue(totals.protein_g, item.protein_g),
+      carbs_g: addNutritionValue(totals.carbs_g, item.carbs_g),
+      fat_g: addNutritionValue(totals.fat_g, item.fat_g),
+      sugar_g: addNutritionValue(totals.sugar_g, item.sugar_g),
+      fiber_g: addNutritionValue(totals.fiber_g, item.fiber_g),
+      vitamin_d_mcg: addNutritionValue(totals.vitamin_d_mcg, item.vitamin_d_mcg),
+    }),
+    {
+      calories: 0,
+      protein_g: 0,
+      carbs_g: 0,
+      fat_g: 0,
+      sugar_g: 0,
+      fiber_g: 0,
+      vitamin_d_mcg: 0,
+    }
+  );
+}
+
+function addNutritionValue(a: number | string, b: number | string) {
+  const left = typeof a === "number" ? a : Number.parseFloat(a);
+  const right = typeof b === "number" ? b : Number.parseFloat(b);
+
+  if (!Number.isFinite(left) || !Number.isFinite(right)) {
+    return 0;
+  }
+
+  return left + right;
 }
 
 function formatQuantityLabel(food: SearchResultItem) {

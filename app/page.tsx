@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import AuthNavActions from "../components/AuthNavActions";
 
 export default function Home() {
   return (
@@ -40,18 +41,12 @@ export default function Home() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/login"
-            className="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/signup"
-            className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-[#08131a] hover:bg-emerald-400"
-          >
-            Get started
-          </Link>
+          <AuthNavActions
+            signInClassName="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
+            signOutClassName="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
+            signUpClassName="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-[#08131a] hover:bg-emerald-400"
+            signUpLabel="Get started"
+          />
         </div>
       </header>
 

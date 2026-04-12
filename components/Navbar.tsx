@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import AuthNavActions from "./AuthNavActions";
 import Logo from "./Logo";
 
 export default function Navbar() {
@@ -23,15 +26,11 @@ export default function Navbar() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link href="/login" className="text-sm text-gray-700 hover:text-green-700">
-            Login
-          </Link>
-          <Link
-            href="/signup"
-            className="rounded-full bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700"
-          >
-            Sign Up
-          </Link>
+          <AuthNavActions
+            signInClassName="text-sm text-gray-700 hover:text-green-700"
+            signOutClassName="text-sm text-gray-700 hover:text-green-700"
+            signUpClassName="rounded-full bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700"
+          />
         </div>
       </div>
     </header>

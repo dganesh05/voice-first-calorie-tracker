@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import AuthNavActions from "../../components/AuthNavActions";
 import { requireAccessTokenOrRedirect } from "../../lib/auth";
 import { getSessionUser } from "../../lib/supabase";
 
@@ -234,12 +235,10 @@ export default function ProfilePage() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/login"
-            className="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
-          >
-            Sign in
-          </Link>
+          <AuthNavActions
+            signInClassName="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
+            signOutClassName="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
+          />
         </div>
       </header>
 

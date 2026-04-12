@@ -158,6 +158,16 @@ class JournalEntryUpdateRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class PersonalFoodCreateRequest(BaseModel):
+    food_name: str = Field(min_length=1, max_length=200)
+    calories: float = Field(default=0, ge=0, le=5000)
+    protein: float = Field(default=0, ge=0, le=1000)
+    carbs: float = Field(default=0, ge=0, le=1000)
+    fat: float = Field(default=0, ge=0, le=1000)
+
+    model_config = {"extra": "forbid"}
+
+
 def get_admin_supabase_or_503():
     if not supabase_admin:
         raise HTTPException(
@@ -587,7 +597,7 @@ async def usda_api_json(
         apply_rate_limit(request.client.host, "foods_search_ip", limit=90, window_seconds=60)
 
     foods = await extract_foods_with_ai(query)
-    results, totals = await compute_results_and_totals(foods)
+    results, totals = await compute_results_and_totals(foods, user_id=user["id"])
     return {
         "query": query,
         "results": results,
@@ -841,6 +851,34 @@ async def create_journal_entry(
         raise translated
 
 
+@app.post("/api/personal-foods")
+async def create_personal_food(
+    payload: PersonalFoodCreateRequest,
+    user: dict = Depends(get_current_user),
+):
+    client = get_admin_supabase_or_503()
+    user_id = user["id"]
+
+    personal_food_payload = {
+        "user_id": user_id,
+        "food_name": payload.food_name,
+        "calories": payload.calories,
+        "protein": payload.protein,
+        "carbs": payload.carbs,
+        "fat": payload.fat,
+        "source": "manual",
+    }
+
+    try:
+        response = client.table("personal_foods").insert(personal_food_payload).execute()
+        rows = response.data or []
+        return rows[0] if rows else personal_food_payload
+    except Exception as exc:
+        translated = _translate_supabase_error(exc)
+        logger.exception("Failed to create personal food")
+        raise translated
+
+
 @app.put("/api/journal/entries/{entry_id}")
 async def update_journal_entry(
     entry_id: str,
@@ -1020,7 +1058,7 @@ async def voice_input_json(
     try:
         cleaned_query = clean_voice_input(normalize_transcript(transcript))
         foods = await extract_foods_with_ai(cleaned_query)
-        results, totals = await compute_results_and_totals(foods)
+        results, totals = await compute_results_and_totals(foods, user_id=user["id"])
     except HTTPException:
         raise
     except Exception:
@@ -1203,6 +1241,78 @@ def normalize_food_text(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
 
+def _personal_food_match_score(query: str, food_name: str) -> int:
+    normalized_query = normalize_food_text(query)
+    normalized_food_name = normalize_food_text(food_name)
+
+    if not normalized_query or not normalized_food_name:
+        return 0
+
+    if normalized_query == normalized_food_name:
+        return 1000
+
+    query_boundary = f" {normalized_query} "
+    food_boundary = f" {normalized_food_name} "
+
+    if query_boundary.startswith(f" {normalized_food_name} "):
+        return 900 + len(normalized_food_name)
+
+    if food_boundary in query_boundary:
+        return 800 + len(normalized_food_name)
+
+    query_tokens = set(normalized_query.split())
+    food_tokens = set(normalized_food_name.split())
+    if food_tokens and food_tokens.issubset(query_tokens):
+        return 700 + len(normalized_food_name)
+
+    return 0
+
+
+def _build_personal_food_nutrition(row: dict) -> dict:
+    return {
+        "calories": row.get("calories", 0) or 0,
+        "protein_g": row.get("protein", 0) or 0,
+        "carbs_g": row.get("carbs", 0) or 0,
+        "fat_g": row.get("fat", 0) or 0,
+        "sugar_g": 0,
+        "fiber_g": 0,
+        "vitamin_d_mcg": 0,
+    }
+
+
+async def fetch_personal_food(user_id: str, food_name: str) -> dict | None:
+    client = get_admin_supabase_or_503()
+
+    try:
+        response = (
+            client.table("personal_foods")
+            .select("food_name, calories, protein, carbs, fat")
+            .eq("user_id", user_id)
+            .execute()
+        )
+    except Exception as exc:
+        translated = _translate_supabase_error(exc)
+        logger.exception("Failed to search personal foods")
+        raise translated
+
+    best_match = None
+    best_score = 0
+    for row in response.data or []:
+        score = _personal_food_match_score(food_name, row.get("food_name", ""))
+        if score > best_score:
+            best_score = score
+            best_match = row
+
+    if not best_match:
+        return None
+
+    return {
+        "food": best_match.get("food_name", food_name),
+        "nutrition": _build_personal_food_nutrition(best_match),
+        "source": "personal",
+    }
+
+
 def candidate_text(candidate: dict) -> str:
     parts = [
         candidate.get("description"),
@@ -1355,7 +1465,7 @@ def select_usda_candidate_with_ai(query: str, foods: list[dict]) -> int | None:
 
 # ------------------ PROCESS ------------------
 
-async def process_foods_json(foods):
+async def process_foods_json(foods, user_id: str | None = None):
     results = []
     totals = {
         "calories": 0,
@@ -1370,7 +1480,18 @@ async def process_foods_json(foods):
         if brand and brand.lower() not in normalize_food_text(search_query):
             search_query = f"{brand} {search_query}".strip()
 
-        nutrition = await fetch_usda(search_query) or {}
+        personal_food = None
+        if user_id:
+            personal_food = await fetch_personal_food(user_id, search_query)
+
+        if personal_food:
+            nutrition = personal_food["nutrition"]
+            source = personal_food["source"]
+            selected_food_name = personal_food["food"]
+        else:
+            nutrition = await fetch_usda(search_query) or {}
+            source = "USDA"
+            selected_food_name = food["food"]
 
         for k in totals:
             val = nutrition.get(k)
@@ -1378,22 +1499,24 @@ async def process_foods_json(foods):
                 totals[k] += val * food["quantity"]
 
         results.append({
-            "food": food["food"],
+            "food": selected_food_name,
             "quantity": food["quantity"],
-            "nutrition": nutrition
+            "nutrition": nutrition,
+            "source": source,
         })
 
     return results, totals
 
 
-async def compute_results_and_totals(foods):
-    raw_results, totals = await process_foods_json(foods)
+async def compute_results_and_totals(foods, user_id: str | None = None):
+    raw_results, totals = await process_foods_json(foods, user_id=user_id)
     normalized_results = []
 
     for item in raw_results:
         food_name = item.get("food", "Unknown food")
         quantity = float(item.get("quantity", 1) or 1)
         nutrition = item.get("nutrition", {}) or {}
+        source = item.get("source", "USDA")
 
         label = f"{quantity:g} x {food_name}" if quantity != 1 else food_name
 
@@ -1401,7 +1524,7 @@ async def compute_results_and_totals(foods):
             {
                 "food": label,
                 "quantity": quantity,
-                "source": "USDA",
+                "source": source,
                 "source_item": food_name,
                 "calories": nutrition.get("calories", 0),
                 "protein_g": nutrition.get("protein_g", 0),
