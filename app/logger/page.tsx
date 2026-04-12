@@ -4,8 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import { ensureAuthenticatedOrRedirect } from "../../lib/auth";
-import { getAccessToken } from "../../lib/supabase";
+import { requireAccessTokenOrRedirect } from "../../lib/auth";
 
 type NutritionTotals = {
   calories: number | string;
@@ -87,7 +86,7 @@ export default function LoggerPage() {
   const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
-    ensureAuthenticatedOrRedirect();
+    requireAccessTokenOrRedirect();
   }, []);
 
   const supportsSpeechRecognition =
@@ -95,9 +94,9 @@ export default function LoggerPage() {
     ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
 
   const fetchByQuery = async (queryText: string) => {
-    const accessToken = await getAccessToken();
+    const accessToken = await requireAccessTokenOrRedirect();
     if (!accessToken) {
-      throw new Error("You must sign in before logging meals.");
+      throw new Error("Your session has expired. Please sign in again.");
     }
 
     const response = await fetch(
@@ -119,9 +118,9 @@ export default function LoggerPage() {
   };
 
   const uploadRecordedAudio = async (blob: Blob) => {
-    const accessToken = await getAccessToken();
+    const accessToken = await requireAccessTokenOrRedirect();
     if (!accessToken) {
-      throw new Error("You must sign in before logging meals.");
+      throw new Error("Your session has expired. Please sign in again.");
     }
 
     const formData = new FormData();
@@ -274,7 +273,7 @@ export default function LoggerPage() {
     setIsLogging(true);
 
     try {
-      const accessToken = await getAccessToken();
+      const accessToken = await requireAccessTokenOrRedirect();
       if (!accessToken) {
         throw new Error("You must sign in before logging meals.");
       }

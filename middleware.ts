@@ -15,14 +15,12 @@ export async function middleware(request: NextRequest) {
   // Check if accessing auth page
   const isAuthPage = AUTH_ROUTES.some((route) => pathname === route);
 
-  // Try to get and verify token (if present).
-  // In this app, browser auth is client-managed, so a missing cookie token
-  // should not force a server-side redirect on protected routes.
   const token = getTokenFromRequest(request);
   const authToken = token ? await verifyAuth(token) : null;
   const isAuthenticated = !!authToken;
 
-  // If a token is present but invalid, treat it as unauthenticated.
+  // Client auth currently stores session outside server-readable cookies.
+  // Avoid redirect loops by redirecting only when a presented token is invalid.
   if (isProtected && token && !isAuthenticated) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);

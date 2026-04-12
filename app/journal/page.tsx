@@ -4,8 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { ensureAuthenticatedOrRedirect } from "../../lib/auth";
-import { getAccessToken } from "../../lib/supabase";
+import { requireAccessTokenOrRedirect } from "../../lib/auth";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -113,13 +112,9 @@ export default function JournalPage() {
 
   useEffect(() => {
     const loadJournal = async () => {
-      const isAuthenticated = await ensureAuthenticatedOrRedirect();
-      if (!isAuthenticated) return;
-
       try {
-        const accessToken = await getAccessToken();
+        const accessToken = await requireAccessTokenOrRedirect();
         if (!accessToken) {
-          window.location.href = "/login";
           return;
         }
 
@@ -155,7 +150,7 @@ export default function JournalPage() {
     setStatusMessage("");
 
     try {
-      const accessToken = await getAccessToken();
+      const accessToken = await requireAccessTokenOrRedirect();
       if (!accessToken) {
         throw new Error("Your session has expired. Please sign in again.");
       }
@@ -200,7 +195,7 @@ export default function JournalPage() {
     setStatusMessage("");
 
     try {
-      const accessToken = await getAccessToken();
+      const accessToken = await requireAccessTokenOrRedirect();
       if (!accessToken) {
         throw new Error("Your session has expired. Please sign in again.");
       }

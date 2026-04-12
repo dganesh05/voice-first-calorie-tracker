@@ -934,10 +934,13 @@ async def delete_journal_entry(
         raise translated
 
 @app.post("/voice")
-async def voice_input(file: UploadFile = File(...)):
+async def voice_input(request: Request, file: UploadFile = File(...)):
     transcript = await transcribe_audio(file)
     if not transcript:
-        return {"error": "Transcription failed"}
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Transcription failed.",
+        )
 
     cleaned_query = clean_voice_input(normalize_transcript(transcript))
     foods = await extract_foods_with_ai(cleaned_query)
@@ -956,11 +959,23 @@ async def voice_input_json(
 
     transcript = await transcribe_audio(file)
     if not transcript:
-        return {"error": "Transcription failed"}
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Transcription failed.",
+        )
 
-    cleaned_query = clean_voice_input(normalize_transcript(transcript))
-    foods = await extract_foods_with_ai(cleaned_query)
-    results, totals = await compute_results_and_totals(foods)
+    try:
+        cleaned_query = clean_voice_input(normalize_transcript(transcript))
+        foods = await extract_foods_with_ai(cleaned_query)
+        results, totals = await compute_results_and_totals(foods)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Voice processing pipeline failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Voice processing failed. Please try again.",
+        )
 
     return {
         "transcript": transcript,
@@ -1150,3 +1165,44 @@ async def process_foods_json(foods):
         })
 
     return results, totals
+
+
+async def compute_results_and_totals(foods):
+    raw_results, totals = await process_foods_json(foods)
+    normalized_results = []
+
+    for item in raw_results:
+        food_name = item.get("food", "Unknown food")
+        quantity = float(item.get("quantity", 1) or 1)
+        nutrition = item.get("nutrition", {}) or {}
+
+        label = f"{quantity:g} x {food_name}" if quantity != 1 else food_name
+
+        normalized_results.append(
+            {
+                "food": label,
+                "source": "USDA",
+                "source_item": food_name,
+                "calories": nutrition.get("calories", 0),
+                "protein_g": nutrition.get("protein_g", 0),
+                "carbs_g": nutrition.get("carbs_g", 0),
+                "fat_g": nutrition.get("fat_g", 0),
+                "sugar_g": nutrition.get("sugar_g", 0),
+                "fiber_g": nutrition.get("fiber_g", 0),
+                "vitamin_d_mcg": nutrition.get("vitamin_d_mcg", 0),
+            }
+        )
+
+    return normalized_results, totals
+
+
+async def process_foods(request: Request, foods, transcript: str | None = None):
+    results, totals = await compute_results_and_totals(foods)
+    payload = {
+        "results": results,
+        "totals": totals,
+    }
+    if transcript is not None:
+        payload["transcript"] = transcript
+
+    return payload

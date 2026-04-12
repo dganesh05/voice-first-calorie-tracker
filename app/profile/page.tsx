@@ -3,6 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { requireAccessTokenOrRedirect } from "../../lib/auth";
+import { getSessionUser } from "../../lib/supabase";
 
 export default function ProfilePage() {
   const [name, setName] = useState("Dev Bollam");
@@ -103,6 +105,30 @@ export default function ProfilePage() {
     setCarbGoal(String(Math.max(carbs, 0)));
     setFatGoal(String(Math.max(fat, 0)));
   };
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const accessToken = await requireAccessTokenOrRedirect();
+      if (!accessToken) {
+        return;
+      }
+
+      const user = await getSessionUser();
+      if (!user) {
+        return;
+      }
+
+      if (user.fullName) {
+        setName(user.fullName);
+      }
+
+      if (user.email) {
+        setEmail(user.email);
+      }
+    };
+
+    loadUser();
+  }, []);
 
   useEffect(() => {
     if (useAutoGoals) {
@@ -372,7 +398,7 @@ export default function ProfilePage() {
                     </div>
                   ) : (
                     <p className="mt-3 text-base font-medium text-white">
-                      {heightFeet}' {heightInches}"
+                      {heightFeet}&apos; {heightInches}&quot;
                     </p>
                   )}
                 </div>

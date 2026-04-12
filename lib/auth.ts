@@ -1,14 +1,11 @@
-import { getSupabaseClient } from "./supabase";
+import { getAccessToken, getSessionUser } from "./supabase";
 
 export async function ensureAuthenticatedOrRedirect(
   redirectTo = "/login"
 ): Promise<boolean> {
-  const supabase = getSupabaseClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const user = await getSessionUser();
 
-  if (!session) {
+  if (!user) {
     if (typeof window !== "undefined") {
       window.location.href = redirectTo;
     }
@@ -16,4 +13,19 @@ export async function ensureAuthenticatedOrRedirect(
   }
 
   return true;
+}
+
+export async function requireAccessTokenOrRedirect(
+  redirectTo = "/login"
+): Promise<string | null> {
+  const accessToken = await getAccessToken();
+
+  if (!accessToken) {
+    if (typeof window !== "undefined") {
+      window.location.href = redirectTo;
+    }
+    return null;
+  }
+
+  return accessToken;
 }
