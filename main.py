@@ -312,8 +312,9 @@ OUTPUT FORMATS (ONLY TWO ALLOWED)
 
 1. MULTIPLE DISTINCT FOODS:
 [
-  {"food": "egg", "quantity": 2},
-  {"food": "milk", "quantity": 1, "unit": "cup"}
+    {"food": "egg", "quantity": 2},
+    {"food": "milk", "quantity": 1, "unit": "cup"},
+    {"food": "maggi noodles", "quantity": 1, "brand": "Maggi", "intent": "branded_product"}
 ]
 
 2. SINGLE DISH:
@@ -392,6 +393,29 @@ Why?
 - Grilled cheese + coke → separate items
 
 -----------------------------------
+BRANDED / PACKAGED PRODUCT RULES
+-----------------------------------
+
+If the input names a brand or packaged product, preserve that intent.
+
+Examples:
+- "maggi" → branded_product
+- "coke" → branded_product
+- "oreo" → branded_product
+- "lays" → branded_product
+- "pepsi" → branded_product
+
+Rules:
+- Keep the exact brand/product wording in the food text whenever a packaged item is intended.
+- If the item is clearly branded or packaged, you may add:
+    - "brand": the brand name if it is obvious from the input
+    - "intent": "branded_product"
+- Treat short brand-like queries as packaged products by default.
+- Prefer the packaged product users likely mean over generic ingredients, condiments, or loose pantry items.
+- If the brand is mentioned with a specific product, keep both parts.
+- Do not rewrite branded short-hands into generic ingredients unless the user clearly asks for the ingredient itself.
+
+-----------------------------------
 PARSING RULES
 -----------------------------------
 
@@ -414,7 +438,12 @@ PARSING RULES
 - Keep full dish description intact
 - Do NOT split ingredients inside a dish
 
-5. IGNORE FILLER TEXT
+5. BRAND PRESERVATION
+- For short branded names and packaged products, preserve the product identity.
+- Examples: "coke", "oreo", "lays", "maggi", "sprite", "nutella".
+- Do not collapse these into a generic food unless the user clearly names the generic item.
+
+6. IGNORE FILLER TEXT
 Ignore:
 "I had", "for lunch", "today", etc.
 
@@ -499,6 +528,30 @@ Output:
 [
   {"food": "pasta", "quantity": 1},
   {"food": "milk", "quantity": 1}
+]
+
+---
+
+Input: "coke"
+Output:
+[
+    {"food": "coke", "quantity": 1, "brand": "Coke", "intent": "branded_product"}
+]
+
+---
+
+Input: "oreo"
+Output:
+[
+    {"food": "oreo", "quantity": 1, "brand": "Oreo", "intent": "branded_product"}
+]
+
+---
+
+Input: "lays chips"
+Output:
+[
+    {"food": "lays chips", "quantity": 1, "brand": "Lays", "intent": "branded_product"}
 ]
 
 -----------------------------------
@@ -1063,10 +1116,16 @@ def validate_foods(data):
     clean = []
     for item in data:
         try:
-            clean.append({
+            clean_item = {
                 "food": item["food"],
-                "quantity": float(item.get("quantity", 1))
-            })
+                "quantity": float(item.get("quantity", 1)),
+            }
+
+            for optional_key in ("brand", "intent", "raw_food", "descriptor"):
+                if optional_key in item and item[optional_key]:
+                    clean_item[optional_key] = item[optional_key]
+
+            clean.append(clean_item)
         except:
             continue
     return clean
@@ -1109,7 +1168,7 @@ async def fetch_usda(food_name: str):
         response = await client.post(
             "https://api.nal.usda.gov/fdc/v1/foods/search",
             params={"api_key": USDA_API_KEY},
-            json={"query": food_name}
+            json={"query": food_name, "pageSize": 10, "requireAllWords": False}
         )
 
         if response.status_code != 200:
@@ -1119,7 +1178,7 @@ async def fetch_usda(food_name: str):
         if not foods:
             return None
 
-        selected = foods[0]
+        selected = select_usda_candidate(food_name, foods)
 
         lookup = {
             "Energy": "calories",
@@ -1139,6 +1198,161 @@ async def fetch_usda(food_name: str):
 
         return nutrition
 
+
+def normalize_food_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def candidate_text(candidate: dict) -> str:
+    parts = [
+        candidate.get("description"),
+        candidate.get("brandOwner"),
+        candidate.get("brandName"),
+        candidate.get("ingredients"),
+        candidate.get("foodCategory"),
+        candidate.get("dataType"),
+    ]
+    return normalize_food_text(" ".join(str(part) for part in parts if part))
+
+
+def count_numeric_nutrients(candidate: dict) -> int:
+    count = 0
+    for nutrient in candidate.get("foodNutrients", []):
+        value = nutrient.get("value")
+        if isinstance(value, (int, float)):
+            count += 1
+    return count
+
+
+def is_brand_like_query(query: str) -> bool:
+    normalized = normalize_food_text(query)
+    tokens = [token for token in normalized.split() if token]
+    if not tokens:
+        return False
+
+    brand_terms = {
+        "maggi",
+        "oreo",
+        "coke",
+        "pepsi",
+        "lays",
+        "kitkat",
+        "kelloggs",
+        "kellogg",
+        "nestle",
+        "nutella",
+        "doritos",
+        "pringles",
+        "fanta",
+        "sprite",
+        "snickers",
+        "twix",
+        "maggi",
+    }
+
+    return len(tokens) <= 3 or any(token in brand_terms for token in tokens)
+
+
+def score_usda_candidate(query: str, candidate: dict) -> float:
+    normalized_query = normalize_food_text(query)
+    query_tokens = [token for token in normalized_query.split() if token]
+    candidate_tokens = set(candidate_text(candidate).split())
+    candidate_description = normalize_food_text(candidate.get("description", ""))
+
+    score = 0.0
+
+    if normalized_query and normalized_query == candidate_description:
+        score += 120
+
+    if normalized_query and normalized_query in candidate_text(candidate):
+        score += 70
+
+    for token in query_tokens:
+        if token in candidate_tokens:
+            score += 12
+
+    if candidate.get("dataType") == "Branded":
+        score += 18
+
+    if candidate.get("brandOwner"):
+        brand_owner = normalize_food_text(str(candidate.get("brandOwner", "")))
+        if any(token and token in brand_owner for token in query_tokens):
+            score += 25
+
+    if candidate.get("brandName"):
+        brand_name = normalize_food_text(str(candidate.get("brandName", "")))
+        if any(token and token in brand_name for token in query_tokens):
+            score += 20
+
+    if is_brand_like_query(query):
+        if candidate.get("dataType") == "Branded":
+            score += 12
+        else:
+            score -= 12
+
+    score += min(count_numeric_nutrients(candidate), 10)
+
+    generic_terms = {"seasoning", "sauce", "powder", "extract", "base"}
+    if is_brand_like_query(query) and any(term in candidate_tokens for term in generic_terms):
+        score -= 10
+
+    return score
+
+
+def select_usda_candidate(query: str, foods: list[dict]) -> dict:
+    scored = sorted(
+        ((score_usda_candidate(query, food), food) for food in foods),
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    if not scored:
+        return {}
+
+    if len(scored) == 1:
+        return scored[0][1]
+
+    best_score, best_candidate = scored[0]
+    second_score, _ = scored[1]
+
+    if is_brand_like_query(query) and best_score - second_score <= 8:
+        ai_choice = select_usda_candidate_with_ai(query, [candidate for _, candidate in scored[:5]])
+        if ai_choice is not None and 0 <= ai_choice < min(len(scored), 5):
+            return scored[ai_choice][1]
+
+    return best_candidate
+
+
+def select_usda_candidate_with_ai(query: str, foods: list[dict]) -> int | None:
+    payload = []
+    for index, food in enumerate(foods):
+        payload.append({
+            "index": index,
+            "description": food.get("description"),
+            "brandOwner": food.get("brandOwner"),
+            "brandName": food.get("brandName"),
+            "dataType": food.get("dataType"),
+            "foodCategory": food.get("foodCategory"),
+            "nutritionCount": count_numeric_nutrients(food),
+        })
+
+    prompt = (
+        "Choose the single best USDA food candidate for the user's intended food. "
+        "The input may be a brand-only or packaged-product query. Prefer the packaged product the user most likely means, "
+        "not a loose ingredient, seasoning, condiment, or pantry base, unless the query clearly asks for that. "
+        "Short-hand branded foods like coke, oreo, lays, maggi, pepsi, and similar packaged items should resolve to the branded product intent. "
+        "Return only JSON in the form {\"selected_index\": number}.\n\n"
+        f"User query: {query}\n"
+        f"Candidates: {json.dumps(payload, ensure_ascii=False)}"
+    )
+
+    text = safe_groq_call(prompt, "You are a strict food resolver that returns only JSON.")
+    data = extract_json(text) if text else None
+    if isinstance(data, dict) and isinstance(data.get("selected_index"), int):
+        return data["selected_index"]
+
+    return None
+
 # ------------------ PROCESS ------------------
 
 async def process_foods_json(foods):
@@ -1151,7 +1365,12 @@ async def process_foods_json(foods):
     }
 
     for food in foods:
-        nutrition = await fetch_usda(food["food"]) or {}
+        search_query = food.get("food", "")
+        brand = food.get("brand")
+        if brand and brand.lower() not in normalize_food_text(search_query):
+            search_query = f"{brand} {search_query}".strip()
+
+        nutrition = await fetch_usda(search_query) or {}
 
         for k in totals:
             val = nutrition.get(k)
@@ -1181,6 +1400,7 @@ async def compute_results_and_totals(foods):
         normalized_results.append(
             {
                 "food": label,
+                "quantity": quantity,
                 "source": "USDA",
                 "source_item": food_name,
                 "calories": nutrition.get("calories", 0),

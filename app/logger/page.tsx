@@ -18,6 +18,7 @@ type NutritionTotals = {
 
 type SearchResultItem = {
   food: string;
+  quantity?: number;
   source?: string;
   source_item?: string;
 } & NutritionTotals;
@@ -81,6 +82,7 @@ export default function LoggerPage() {
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [isLogging, setIsLogging] = useState(false);
+  const [selectedFoodIndex, setSelectedFoodIndex] = useState(0);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -142,6 +144,7 @@ export default function LoggerPage() {
     const data: VoiceResponse = await response.json();
     setTranscript(data.transcript || "");
     setApiData({ query: data.query, results: data.results, totals: data.totals });
+    setSelectedFoodIndex(0);
     setStatusMessage("");
   };
 
@@ -280,6 +283,7 @@ export default function LoggerPage() {
 
       for (const item of apiData.results) {
         const parsed = parseLoggedFoodLabel(item.food);
+        const quantity = typeof item.quantity === "number" && item.quantity > 0 ? item.quantity : parsed.quantity;
         const calories = typeof item.calories === "number" ? item.calories : 0;
         const protein = typeof item.protein_g === "number" ? item.protein_g : 0;
         const carbs = typeof item.carbs_g === "number" ? item.carbs_g : 0;
@@ -293,7 +297,7 @@ export default function LoggerPage() {
           },
           body: JSON.stringify({
             food_name: parsed.foodName,
-            quantity: parsed.quantity,
+            quantity,
             calories,
             protein_g: protein,
             carbs_g: carbs,
@@ -327,7 +331,8 @@ export default function LoggerPage() {
   const protein = apiData ? formatValue(apiData.totals.protein_g, "g") : "--";
   const carbs = apiData ? formatValue(apiData.totals.carbs_g, "g") : "--";
   const fats = apiData ? formatValue(apiData.totals.fat_g, "g") : "--";
-  const foods = apiData ? apiData.results.map((item) => item.food) : [];
+  const foods = apiData ? apiData.results : [];
+  const selectedFood = foods[selectedFoodIndex] ?? null;
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-gradient-to-b from-[#0b1220] via-[#0b1220] to-[#07121a] text-white">
@@ -508,11 +513,6 @@ export default function LoggerPage() {
                   <div className="text-right" />
                 </div>
 
-                <div className="mt-6 h-2 w-full rounded-full bg-white/10">
-                  <div className="h-2 w-[68%] rounded-full bg-emerald-400" />
-                </div>
-
-                <p className="mt-2 text-xs text-white/50">Daily progress preview</p>
               </div>
 
               <div className="mt-6 grid grid-cols-3 gap-4">
@@ -522,12 +522,80 @@ export default function LoggerPage() {
               </div>
 
               <div className="mt-6 rounded-3xl bg-black/20 p-5 ring-1 ring-white/10">
-                <p className="text-sm font-medium text-white/80">Detected foods</p>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  {foods.map((food, i) => (
-                    <FoodPill key={i} label={food} />
-                  ))}
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-sm font-medium text-white/80">
+                    Detected foods ({foods.length})
+                  </p>
+                  {selectedFood ? (
+                    <p className="text-xs text-white/45">
+                      Tap an item to inspect calories, macros, and source.
+                    </p>
+                  ) : null}
                 </div>
+
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {foods.map((food, i) => {
+                    const quantityLabel = formatQuantityLabel(food);
+                    const isSelected = i === selectedFoodIndex;
+
+                    return (
+                      <button
+                        key={`${food.source_item ?? food.food}-${i}`}
+                        type="button"
+                        onClick={() => setSelectedFoodIndex(i)}
+                        className={`rounded-full px-4 py-2 text-sm ring-1 transition ${
+                          isSelected
+                            ? "bg-emerald-500/20 text-emerald-100 ring-emerald-400/30"
+                            : "bg-white/10 text-white/80 ring-white/10 hover:bg-white/15"
+                        }`}
+                      >
+                        {quantityLabel}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedFood ? (
+                  <div className="mt-5 rounded-3xl bg-white/5 p-5 ring-1 ring-white/10">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-white/45">
+                          Selected food
+                        </p>
+                        <h3 className="mt-1 text-xl font-semibold text-white">
+                          {formatQuantityLabel(selectedFood)}
+                        </h3>
+                        {selectedFood.source_item ? (
+                          <p className="mt-1 text-sm text-white/55">
+                            Resolver item: {selectedFood.source_item}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="rounded-2xl bg-black/20 px-4 py-3 ring-1 ring-white/10">
+                        <p className="text-xs uppercase tracking-wide text-white/45">
+                          Source
+                        </p>
+                        <p className="mt-1 text-sm font-medium text-emerald-200">
+                          {selectedFood.source ?? "Resolver"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+                      <MacroCard label="Calories" value={formatValue(selectedFood.calories, " kcal")} />
+                      <MacroCard label="Protein" value={formatValue(selectedFood.protein_g, "g")} />
+                      <MacroCard label="Carbs" value={formatValue(selectedFood.carbs_g, "g")} />
+                      <MacroCard label="Fat" value={formatValue(selectedFood.fat_g, "g")} />
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-3 gap-3 text-sm text-white/70">
+                      <DetailStat label="Sugar" value={formatValue(selectedFood.sugar_g, "g")} />
+                      <DetailStat label="Fiber" value={formatValue(selectedFood.fiber_g, "g")} />
+                      <DetailStat label="Vitamin D" value={formatValue(selectedFood.vitamin_d_mcg, "mcg")} />
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-6 flex gap-4">
@@ -568,10 +636,18 @@ function MacroCard({ label, value }: { label: string; value: string | number }) 
   );
 }
 
-function FoodPill({ label }: { label: string }) {
+function DetailStat({ label, value }: { label: string; value: string | number }) {
   return (
-    <span className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/80 ring-1 ring-white/10">
-      {label}
-    </span>
+    <div className="rounded-2xl bg-black/20 px-3 py-3 ring-1 ring-white/10">
+      <p className="text-[11px] uppercase tracking-wide text-white/45">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-white">{value}</p>
+    </div>
   );
+}
+
+function formatQuantityLabel(food: SearchResultItem) {
+  const quantity = typeof food.quantity === "number" && food.quantity > 0 ? food.quantity : 1;
+  const baseName = food.source_item ?? food.food;
+  const quantityLabel = Number.isInteger(quantity) ? String(quantity) : String(Math.round(quantity * 100) / 100);
+  return `${quantityLabel} x ${baseName}`;
 }
