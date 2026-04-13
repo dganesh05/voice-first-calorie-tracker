@@ -12,6 +12,23 @@ load_dotenv(dotenv_path=Path(__file__).resolve().with_name(".env"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
+def _parser_model_candidates() -> list[str]:
+    """Return ordered Groq parser model candidates.
+
+    Can be overridden with GROQ_PARSER_MODELS="model-a,model-b".
+    """
+    raw = str(os.getenv("GROQ_PARSER_MODELS") or "").strip()
+    if raw:
+        models = [m.strip() for m in raw.split(",") if m.strip()]
+        if models:
+            return models
+
+    return [
+        "llama-3.1-8b-instant",
+        "llama3-8b-8192",
+    ]
+
+
 NUMBER_WORDS = {
     "zero": 0,
     "a": 1,
@@ -159,6 +176,47 @@ def _build_fallback_query(
     return " ".join(deduped_parts).strip()
 
 
+def _query_token_set(query: str | None) -> set[str]:
+    normalized = _sanitize_food_text(query or "")
+    return {token for token in normalized.split() if token}
+
+
+def _dedupe_normalized_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove redundant parser items produced by overlapping model entities.
+
+    This keeps distinct foods, but collapses duplicates that only differ by a
+    weaker fallback query (for example, when both a compound item and a single
+    component item are emitted for the same food).
+    """
+    grouped: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+
+    for item in items:
+        key = (
+            str(item.get("food_name") or "").strip().lower(),
+            str(item.get("unit") or "").strip().lower(),
+            float(item.get("quantity") or 0),
+            tuple(str(d).strip().lower() for d in (item.get("descriptors") or [])),
+            str(item.get("brand") or "").strip().lower(),
+            tuple(str(s).strip().lower() for s in (item.get("source_items") or [])),
+        )
+        grouped.setdefault(key, []).append(item)
+
+    deduped: list[dict[str, Any]] = []
+    for variants in grouped.values():
+        if len(variants) == 1:
+            deduped.append(variants[0])
+            continue
+
+        # Prefer the variant with the richest fallback query token coverage.
+        best = max(
+            variants,
+            key=lambda item: len(_query_token_set(item.get("fallback_search_query"))),
+        )
+        deduped.append(best)
+
+    return deduped
+
+
 def _normalize_top_level_payload(parsed: Any) -> list[dict[str, Any]]:
     # Accept either a list of items or a single dish object and normalize to list.
     if isinstance(parsed, list):
@@ -210,25 +268,45 @@ Rules:
 - Keep descriptors as an array (can be empty).
 - Use food-context reasoning (not fixed mappings) to infer split_foods and source_items.
 - If the transcript implies transformed or composite foods, include likely component foods in split_foods/source_items.
+- Prefer the food form implied by the full transcript, not the shortest token.
+- Example: "maggi" or "1 bowl maggi" should usually normalize to Maggi noodles, not seasoning, unless the transcript explicitly says seasoning, sauce, bouillon, or a similar derivative.
+- Example: "avocado toast" should produce avocado as the edible component and bread as the source item; do not switch avocado to oil unless the transcript explicitly mentions oil, dressing, or cooking oil.
+- Example: when a compound dish has both a main ingredient and a base item, keep them distinct in split_foods/source_items rather than repeating the same ingredient twice.
 """.strip()
     user_prompt = f"Process this transcript:\n\"{transcript}\""
     
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={
-                "model": "llama3-8b-8192", # Fast and free
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": 0.0
-            }
-        )
+    models = _parser_model_candidates()
+    errors: list[str] = []
 
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
+    async with httpx.AsyncClient() as client:
+        content = ""
+        for model in models:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.0,
+                },
+            )
+
+            if response.status_code < 400:
+                content = response.json()["choices"][0]["message"]["content"]
+                break
+
+            detail = (response.text or response.reason_phrase or "unknown error").strip()
+            errors.append(f"model={model} status={response.status_code} detail={detail}")
+
+        if not content:
+            raise RuntimeError("Groq transcript parser failed: " + " | ".join(errors))
+
         parsed = _extract_json_payload(content)
         entries = _normalize_top_level_payload(parsed)
         if not entries:
@@ -279,4 +357,4 @@ Rules:
                     }
                 )
 
-        return normalized
+        return _dedupe_normalized_items(normalized)

@@ -5,14 +5,17 @@
 
     <style>
         :root {
-            --bg: #f8f4ea;
-            --panel: #fffdf8;
-            --ink: #1f2933;
-            --accent: #0f766e;
-            --accent-alt: #b45309;
-            --muted: #52606d;
-            --danger: #b91c1c;
-            --line: #d9d0bd;
+            --bg-main: #0b1220;
+            --bg-alt: #07121a;
+            --panel: rgba(255, 255, 255, 0.06);
+            --panel-strong: rgba(255, 255, 255, 0.1);
+            --ink: #e8eef8;
+            --muted: rgba(232, 238, 248, 0.72);
+            --line: rgba(255, 255, 255, 0.14);
+            --accent: #34d399;
+            --accent-strong: #10b981;
+            --warn: #f59e0b;
+            --danger: #f87171;
         }
 
         * {
@@ -20,36 +23,121 @@
         }
 
         body {
-            font-family: "Avenir Next", "Nunito Sans", "Segoe UI", sans-serif;
+            font-family: "Segoe UI", "Avenir Next", sans-serif;
             margin: 0;
             min-height: 100vh;
             color: var(--ink);
-            background:
-                radial-gradient(circle at top right, #f5e8c9, transparent 40%),
-                radial-gradient(circle at bottom left, #d6f0e8, transparent 45%),
-                var(--bg);
-            padding: 24px 14px 60px;
+            background: linear-gradient(180deg, var(--bg-main) 0%, var(--bg-main) 52%, var(--bg-alt) 100%);
+            padding: 22px 14px 60px;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        .bg-glow {
+            pointer-events: none;
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            overflow: hidden;
+        }
+
+        .bg-glow::before,
+        .bg-glow::after {
+            content: "";
+            position: absolute;
+            border-radius: 999px;
+            filter: blur(120px);
+        }
+
+        .bg-glow::before {
+            width: 540px;
+            height: 540px;
+            background: rgba(16, 185, 129, 0.22);
+            top: -170px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .bg-glow::after {
+            width: 420px;
+            height: 420px;
+            background: rgba(14, 165, 233, 0.18);
+            right: -140px;
+            bottom: 30px;
         }
 
         .layout {
-            width: min(860px, 100%);
+            width: min(940px, 100%);
             margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 14px;
+            margin-bottom: 14px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            backdrop-filter: blur(8px);
+        }
+
+        .brand {
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            color: #ffffff;
+            text-decoration: none;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .nav-link {
+            text-decoration: none;
+            color: var(--muted);
+            font-weight: 700;
+            padding: 7px 11px;
+            border-radius: 999px;
+            border: 1px solid transparent;
+            transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+        }
+
+        .nav-link:hover {
+            color: #ffffff;
+            border-color: var(--line);
+            background: rgba(255, 255, 255, 0.08);
         }
 
         h1 {
             text-align: center;
             font-size: clamp(2rem, 3vw, 2.6rem);
-            margin: 8px 0 24px;
+            margin: 8px 0 20px;
             letter-spacing: 0.02em;
+            color: #ffffff;
+            text-shadow: 0 0 18px rgba(16, 185, 129, 0.22);
+        }
+
+        h2 {
+            margin: 0 0 12px;
+            color: #ffffff;
         }
 
         .panel {
             background: var(--panel);
-            border-radius: 16px;
+            border-radius: 18px;
             border: 1px solid var(--line);
-            box-shadow: 0 12px 30px rgba(31, 41, 51, 0.08);
+            box-shadow: 0 18px 38px rgba(3, 8, 20, 0.42);
             padding: 18px;
             margin-bottom: 18px;
+            backdrop-filter: blur(8px);
         }
 
         .top-controls {
@@ -68,12 +156,19 @@
         input,
         textarea {
             width: 100%;
-            border-radius: 10px;
+            border-radius: 12px;
             border: 1px solid var(--line);
             padding: 11px 12px;
             font-size: 1rem;
             color: var(--ink);
-            background: #fff;
+            background: rgba(7, 18, 26, 0.7);
+            outline: none;
+        }
+
+        input:focus,
+        textarea:focus {
+            border-color: rgba(52, 211, 153, 0.7);
+            box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
         }
 
         textarea {
@@ -89,41 +184,44 @@
 
         button {
             border: none;
-            border-radius: 10px;
+            border-radius: 999px;
             padding: 10px 14px;
             font-size: 0.95rem;
             font-weight: 700;
             cursor: pointer;
-            transition: transform 0.15s ease, opacity 0.2s ease;
+            transition: transform 0.15s ease, opacity 0.2s ease, filter 0.2s ease;
         }
 
         button:hover {
             transform: translateY(-1px);
+            filter: brightness(1.06);
         }
 
         button:disabled {
             opacity: 0.5;
             cursor: not-allowed;
             transform: none;
+            filter: none;
         }
 
         .btn-primary {
-            background: var(--accent);
-            color: #f3fffd;
+            background: var(--accent-strong);
+            color: #052015;
         }
 
         .btn-secondary {
-            background: #0d9488;
-            color: #f0fdfa;
+            background: rgba(255, 255, 255, 0.12);
+            color: #f7fbff;
+            border: 1px solid var(--line);
         }
 
         .btn-danger {
-            background: #b91c1c;
+            background: rgba(248, 113, 113, 0.85);
             color: #fff5f5;
         }
 
         .btn-warm {
-            background: var(--accent-alt);
+            background: rgba(245, 158, 11, 0.85);
             color: #fff7ed;
         }
 
@@ -138,6 +236,7 @@
             font-size: 0.95rem;
             font-weight: 600;
             margin-top: 8px;
+            color: var(--muted);
         }
 
         .status.error {
@@ -145,7 +244,7 @@
         }
 
         .status.ok {
-            color: #065f46;
+            color: var(--accent);
         }
 
         .cards {
@@ -153,21 +252,29 @@
             gap: 12px;
         }
 
+        .content-grid {
+            display: grid;
+            gap: 14px;
+            grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+            align-items: start;
+        }
+
         .meal-card {
             border: 1px solid var(--line);
-            border-radius: 14px;
+            border-radius: 16px;
             padding: 14px;
-            background: #fffcf5;
+            background: rgba(255, 255, 255, 0.05);
         }
 
         .meal-card.unresolved {
-            border-color: #e8b4b4;
-            background: #fff7f7;
+            border-color: rgba(248, 113, 113, 0.5);
+            background: rgba(248, 113, 113, 0.08);
         }
 
         .meal-title {
             margin: 0 0 8px;
             font-size: 1.1rem;
+            color: #ffffff;
         }
 
         .meta {
@@ -185,10 +292,10 @@
 
         .macro-cell {
             border: 1px solid var(--line);
-            border-radius: 9px;
+            border-radius: 11px;
             padding: 8px;
             text-align: center;
-            background: #fff;
+            background: rgba(255, 255, 255, 0.06);
         }
 
         .macro-label {
@@ -202,6 +309,7 @@
         .macro-value {
             font-weight: 800;
             font-size: 1rem;
+            color: #ffffff;
         }
 
         .card-actions {
@@ -210,21 +318,50 @@
             flex-wrap: wrap;
         }
 
-        .editor {
-            margin-top: 12px;
-            border-top: 1px dashed var(--line);
-            padding-top: 12px;
+        .quick-add {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            padding: 10px;
+        }
+
+        .quick-add summary {
+            list-style: none;
+            cursor: pointer;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #ffffff;
+        }
+
+        .quick-add summary::-webkit-details-marker {
             display: none;
         }
 
-        .editor.open {
-            display: block;
+        .plus-chip {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--accent-strong);
+            color: #052015;
+            font-size: 1.1rem;
+            line-height: 1;
         }
 
-        .editor-grid {
+        .quick-add-body {
+            margin-top: 10px;
+            border-top: 1px dashed var(--line);
+            padding-top: 10px;
+        }
+
+        .quick-add-grid {
             display: grid;
             gap: 8px;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: 1fr;
             margin-bottom: 10px;
         }
 
@@ -234,12 +371,23 @@
             gap: 8px;
         }
 
+        @media (max-width: 860px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         @media (max-width: 640px) {
             .inline-grid,
-            .editor-grid,
+            .quick-add-grid,
             .macro-grid,
             .totals-row {
                 grid-template-columns: 1fr;
+            }
+
+            .navbar {
+                flex-direction: column;
+                align-items: flex-start;
             }
         }
     </style>
@@ -247,7 +395,17 @@
 
 <body>
 
+<div class="bg-glow" aria-hidden="true"></div>
+
 <div class="layout">
+    <nav class="navbar" aria-label="Main navigation">
+        <a class="brand" href="/log">Vocalorie</a>
+        <div class="nav-links">
+            <a class="nav-link" href="/log">Log Meal</a>
+            <a class="nav-link" href="/journal-page">Journal</a>
+        </div>
+    </nav>
+
     <h1>Vocalorie Logger</h1>
 
     <section class="panel top-controls">
@@ -267,13 +425,37 @@
             <button id="journalBtn" class="btn-secondary">View Journal JSON</button>
             <button id="logoutBtn" class="btn-warm">Log Out</button>
         </div>
-        <p class="hint">Each parsed item becomes one staging card. Log it directly or create a personal meal and auto-log.</p>
+        <p class="hint">Each parsed item becomes one staging card. Log directly, and use + Add Personal Food for quick custom entries.</p>
         <div id="status" class="status"></div>
     </section>
 
-    <section class="panel">
-        <h2>Staged Items</h2>
-        <div id="cards" class="cards"></div>
+    <section class="content-grid">
+        <section class="panel">
+            <h2>Staged Items</h2>
+            <div id="cards" class="cards"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Quick Add</h2>
+            <details class="quick-add" id="quickAddDetails">
+                <summary>
+                    <span class="plus-chip">+</span>
+                    Add Personal Food
+                </summary>
+                <div class="quick-add-body">
+                    <form id="quickAddForm">
+                        <div class="quick-add-grid">
+                            <input id="quickName" name="name" placeholder="Food name" required>
+                            <input id="quickCalories" name="calories" type="number" min="0" step="0.1" placeholder="Calories" required>
+                            <input id="quickProtein" name="protein" type="number" min="0" step="0.1" placeholder="Protein (g)">
+                            <input id="quickCarbs" name="carbs" type="number" min="0" step="0.1" placeholder="Carbs (g)">
+                            <input id="quickFat" name="fat" type="number" min="0" step="0.1" placeholder="Fat (g)">
+                        </div>
+                        <button id="quickAddSubmit" class="btn-secondary" type="submit">Save Personal Food</button>
+                    </form>
+                </div>
+            </details>
+        </section>
     </section>
 
     <section class="panel">
@@ -293,6 +475,10 @@
     const statusEl = document.getElementById("status");
     const cardsEl = document.getElementById("cards");
     const totalsEl = document.getElementById("totals");
+    const quickAddForm = document.getElementById("quickAddForm");
+    const quickAddSubmit = document.getElementById("quickAddSubmit");
+    const quickAddDetails = document.getElementById("quickAddDetails");
+    const quickNameInput = document.getElementById("quickName");
 
     const state = {
         items: [],
@@ -573,13 +759,13 @@
         statusEl.className = `status ${type}`;
     }
 
-    function readEditorValues(item) {
-        const root = document.querySelector(`[data-editor='${item.client_item_id}']`);
-        const name = root.querySelector("[data-field='name']").value.trim();
-        const calories = Number(root.querySelector("[data-field='calories']").value);
-        const protein = Number(root.querySelector("[data-field='protein']").value || 0);
-        const carbs = Number(root.querySelector("[data-field='carbs']").value || 0);
-        const fat = Number(root.querySelector("[data-field='fat']").value || 0);
+    function readQuickAddValues() {
+        const form = new FormData(quickAddForm);
+        const name = String(form.get("name") || "").trim();
+        const calories = Number(form.get("calories"));
+        const protein = Number(form.get("protein") || 0);
+        const carbs = Number(form.get("carbs") || 0);
+        const fat = Number(form.get("fat") || 0);
 
         if (!name) {
             throw new Error("Food name is required.");
@@ -634,7 +820,7 @@
             if (!state.items.length) {
                 setStatus("No items were parsed from that transcript.", "error");
             } else {
-                setStatus("Staging ready. Choose Log Meal or Create Meal per item.", "ok");
+                setStatus("Staging ready. Use Log Meal per item.", "ok");
             }
 
             render();
@@ -677,22 +863,11 @@
         }
     }
 
-    function toggleEditor(itemId) {
-        const editor = document.querySelector(`[data-editor='${itemId}']`);
-        if (editor) {
-            editor.classList.toggle("open");
-        }
-    }
-
-    async function createAndLog(item) {
-        const saveBtn = document.querySelector(`[data-save='${item.client_item_id}']`);
-        if (!saveBtn) {
-            return;
-        }
-        saveBtn.disabled = true;
-
+    async function createPersonalFood(event) {
+        event.preventDefault();
+        quickAddSubmit.disabled = true;
         try {
-            const values = readEditorValues(item);
+            const values = readQuickAddValues();
 
             await apiFetch("/foods/manual", {
                 method: "POST",
@@ -707,28 +882,14 @@
                 })
             });
 
-            await apiFetch("/foods/confirm", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    items: [
-                        {
-                            name: values.name,
-                            calories: values.calories,
-                            protein: values.protein,
-                            carbs: values.carbs,
-                            fat: values.fat
-                        }
-                    ]
-                })
-            });
-
-            setStatus(`Created personal meal and logged ${values.name}.`, "ok");
-            toggleEditor(item.client_item_id);
+            setStatus(`Saved ${values.name} to personal foods.`, "ok");
+            quickAddForm.reset();
+            quickAddDetails.open = true;
+            quickNameInput.focus();
         } catch (error) {
-            setStatus(error.message || "Failed to create or log meal.", "error");
+            setStatus(error.message || "Failed to create personal food.", "error");
         } finally {
-            saveBtn.disabled = false;
+            quickAddSubmit.disabled = false;
         }
     }
 
@@ -757,7 +918,7 @@
 
     function cardTemplate(item) {
         const unresolvedClass = item.resolved ? "" : "unresolved";
-        const unresolvedNote = item.resolved ? "" : "<p class='meta'>No resolver match found. Create a personal meal to continue.</p>";
+        const unresolvedNote = item.resolved ? "" : "<p class='meta'>No resolver match found. Add a personal food from the Quick Add panel.</p>";
 
         return `
             <article class="meal-card ${unresolvedClass}">
@@ -772,17 +933,6 @@
                 </div>
                 <div class="card-actions">
                     <button class="btn-primary" data-log="${item.client_item_id}" ${item.resolved ? "" : "disabled"}>Log Meal</button>
-                    <button class="btn-secondary" data-edit="${item.client_item_id}">Create Meal</button>
-                </div>
-                <div class="editor" data-editor="${item.client_item_id}">
-                    <div class="editor-grid">
-                        <input data-field="name" value="${item.name || ""}" placeholder="Food name">
-                        <input data-field="calories" type="number" min="0" step="0.1" value="${Number(item.calories || 0)}" placeholder="Calories">
-                        <input data-field="protein" type="number" min="0" step="0.1" value="${Number(item.protein || 0)}" placeholder="Protein (g)">
-                        <input data-field="carbs" type="number" min="0" step="0.1" value="${Number(item.carbs || 0)}" placeholder="Carbs (g)">
-                        <input data-field="fat" type="number" min="0" step="0.1" value="${Number(item.fat || 0)}" placeholder="Fat (g)">
-                    </div>
-                    <button class="btn-warm" data-save="${item.client_item_id}">Save To Personal + Auto Log</button>
                 </div>
             </article>
         `;
@@ -803,16 +953,6 @@
             const logBtn = document.querySelector(`[data-log='${item.client_item_id}']`);
             if (logBtn) {
                 logBtn.addEventListener("click", () => logItem(item));
-            }
-
-            const editBtn = document.querySelector(`[data-edit='${item.client_item_id}']`);
-            if (editBtn) {
-                editBtn.addEventListener("click", () => toggleEditor(item.client_item_id));
-            }
-
-            const saveBtn = document.querySelector(`[data-save='${item.client_item_id}']`);
-            if (saveBtn) {
-                saveBtn.addEventListener("click", () => createAndLog(item));
             }
         });
     }
@@ -861,6 +1001,7 @@
     clearBtn.addEventListener("click", clearAll);
     journalBtn.addEventListener("click", openJournal);
     logoutBtn.addEventListener("click", logout);
+    quickAddForm.addEventListener("submit", createPersonalFood);
 
     configureSpeech();
     render();
