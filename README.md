@@ -304,7 +304,3 @@ Contributions are welcome. Recommended flow:
 2. Create a focused branch.
 3. Keep changes scoped and include reproducible verification steps.
 4. Run lint and security scripts before opening a PR.
-
-## License
-
-No license file is currently present in this repository. Add a project license before external distribution.
