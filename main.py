@@ -44,7 +44,6 @@ RATE_LIMIT_LOCK = Lock()
 
 port = int(os.environ.get("PORT", 8000))
 
-
 def validate_environment() -> None:
     required = [
         "USDA_API_KEY",
@@ -70,14 +69,6 @@ allowed_origins = [
     if origin.strip()
 ]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
-)
-
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
@@ -85,7 +76,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "microphone=(self), camera=(), geolocation=()"
+    response.headers["Permissions-Policy"] = "microphone=(self \"https://voice-first-calorie-tracker-frontend.onrender.com\")"
 
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
@@ -108,8 +99,7 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000"
+        "https://voice-first-calorie-tracker-frontend.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
