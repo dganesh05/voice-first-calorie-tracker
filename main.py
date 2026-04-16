@@ -10,6 +10,7 @@ import time
 from datetime import date
 from collections import defaultdict
 from threading import Lock
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse
@@ -195,6 +196,12 @@ def _translate_supabase_error(exc: Exception) -> HTTPException:
     message = str(exc)
     lower_message = message.lower()
 
+    if "23503" in lower_message and "user_id_fkey" in lower_message:
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User record prerequisite missing for journal writes. Ensure authenticated users are upserted into users before inserting child rows.",
+        )
+
     if "relation" in lower_message and "does not exist" in lower_message:
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -217,6 +224,33 @@ def _translate_supabase_error(exc: Exception) -> HTTPException:
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"Supabase persistence error: {message}",
     )
+
+
+def ensure_user_record(client, user: dict) -> None:
+    user_id = user.get("id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid session payload.",
+        )
+
+    payload = {"id": user_id}
+
+    email = user.get("email")
+    if email:
+        payload["email"] = email
+
+    user_metadata = user.get("user_metadata") or {}
+    display_name = user_metadata.get("full_name") or user_metadata.get("name")
+    if display_name:
+        payload["display_name"] = display_name
+
+    try:
+        client.table("users").upsert(payload, on_conflict="id").execute()
+    except Exception as exc:
+        translated = _translate_supabase_error(exc)
+        logger.exception("Failed to ensure users row for authenticated user")
+        raise translated
 
 
 def apply_rate_limit(identifier: str, route_key: str, limit: int, window_seconds: int):
@@ -798,6 +832,8 @@ async def create_journal_entry(
     client = get_admin_supabase_or_503()
     user_id = user["id"]
 
+    ensure_user_record(client, user)
+
     insert_payload = {
         "user_id": user_id,
         "food_name": payload.food_name,
@@ -837,6 +873,8 @@ async def create_personal_food(
     client = get_admin_supabase_or_503()
     user_id = user["id"]
 
+    ensure_user_record(client, user)
+
     personal_food_payload = {
         "user_id": user_id,
         "food_name": payload.food_name,
@@ -859,7 +897,7 @@ async def create_personal_food(
 
 @app.put("/api/journal/entries/{entry_id}")
 async def update_journal_entry(
-    entry_id: str,
+    entry_id: UUID,
     payload: JournalEntryUpdateRequest,
     user: dict = Depends(get_current_user),
 ):
@@ -895,7 +933,7 @@ async def update_journal_entry(
         response = (
             client.table("daily_logs")
             .update(daily_log_updates)
-            .eq("id", entry_id)
+            .eq("id", str(entry_id))
             .eq("user_id", user_id)
             .execute()
         )
@@ -928,7 +966,7 @@ async def update_journal_entry(
 
 @app.delete("/api/journal/entries/{entry_id}")
 async def delete_journal_entry(
-    entry_id: str,
+    entry_id: UUID,
     user: dict = Depends(get_current_user),
 ):
     client = get_admin_supabase_or_503()
@@ -938,7 +976,7 @@ async def delete_journal_entry(
         response = (
             client.table("daily_logs")
             .delete()
-            .eq("id", entry_id)
+            .eq("id", str(entry_id))
             .eq("user_id", user_id)
             .execute()
         )
@@ -948,7 +986,7 @@ async def delete_journal_entry(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Journal entry not found.",
             )
-        return {"deleted": True, "id": entry_id}
+        return {"deleted": True, "id": str(entry_id)}
     except HTTPException:
         raise
     except Exception as exc:

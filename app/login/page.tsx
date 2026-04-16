@@ -81,7 +81,7 @@ export default function LoginPage() {
               alt="Vocalorie"
               width={250}
               height={250}
-              className="object-contain drop-shadow-[0_0_20px_rgba(16,185,129,0.4)]"
+              className="h-auto w-auto object-contain drop-shadow-[0_0_20px_rgba(16,185,129,0.4)]"
               priority
             />
             <h1 className="mt-5 text-3xl font-semibold tracking-tight">

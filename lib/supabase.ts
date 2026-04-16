@@ -48,6 +48,14 @@ export function clearCachedSession() {
   cacheExpiresAt = 0;
 }
 
+function isMissingRefreshTokenError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return /invalid refresh token|refresh token not found/i.test(error.message);
+}
+
 export async function getSessionUser(forceRefresh = false): Promise<SessionUser | null> {
   if (!forceRefresh && isCacheFresh()) {
     return cachedSessionUser;
@@ -59,27 +67,36 @@ export async function getSessionUser(forceRefresh = false): Promise<SessionUser 
 
   const supabase = getSupabaseClient();
   inFlightSessionRequest = (async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    const sessionUser = session?.user;
-    const user: SessionUser | null = sessionUser
-      ? {
-          id: sessionUser.id,
-          email: sessionUser.email ?? null,
-          fullName:
-            (typeof sessionUser.user_metadata?.full_name === "string"
-              ? sessionUser.user_metadata.full_name
-              : null) ??
-            (typeof sessionUser.user_metadata?.name === "string"
-              ? sessionUser.user_metadata.name
-              : null),
-        }
-      : null;
+      const sessionUser = session?.user;
+      const user: SessionUser | null = sessionUser
+        ? {
+            id: sessionUser.id,
+            email: sessionUser.email ?? null,
+            fullName:
+              (typeof sessionUser.user_metadata?.full_name === "string"
+                ? sessionUser.user_metadata.full_name
+                : null) ??
+              (typeof sessionUser.user_metadata?.name === "string"
+                ? sessionUser.user_metadata.name
+                : null),
+          }
+        : null;
 
-    cacheSessionData(user, session?.access_token ?? null);
-    return user;
+      cacheSessionData(user, session?.access_token ?? null);
+      return user;
+    } catch (error: unknown) {
+      if (isMissingRefreshTokenError(error)) {
+        clearCachedSession();
+        return null;
+      }
+
+      throw error;
+    }
   })();
 
   try {

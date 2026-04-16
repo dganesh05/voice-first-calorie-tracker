@@ -202,7 +202,7 @@ export default function ProfilePage() {
       <header className="relative z-20 mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
         <Link href="/" className="flex items-center gap-3">
           <Image
-            src="/vocalorie-icon.png"
+            src="/vocalorie-icon.PNG"
             alt="Vocalorie"
             width={42}
             height={42}

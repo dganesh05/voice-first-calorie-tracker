@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "security:smoke": "bash ./scripts/security_smoke_test.sh",
+    "security:sqli": "bash ./scripts/security_sqli_test.sh",
     "security:identity": "bash ./scripts/security_identity_test.sh",
     "security:rls": "bash ./scripts/security_rls_test.sh",
     "validate:no-secrets": "bash ./scripts/validate_no_secrets.sh"

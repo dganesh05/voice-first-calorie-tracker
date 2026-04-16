@@ -55,6 +55,21 @@ Scope: FastAPI API endpoints, Next.js route guards, Supabase-authenticated flows
 - Input: Valid Supabase session cookie
 - Expected: Redirect to /logger
 
+11. SQLi payload on journal create
+- Endpoint: POST /api/journal/entries
+- Input: food_name="' OR 1=1 --"
+- Expected: 200; payload stored as literal text; no server error
+
+12. SQLi payload on journal update
+- Endpoint: PUT /api/journal/entries/{entry_id}
+- Input: food_name="\"; DROP TABLE daily_logs; --"
+- Expected: 200; payload treated as plain data; no server error
+
+13. SQLi payload in path identifier
+- Endpoint: DELETE /api/journal/entries/%27%20OR%201%3D1%20--
+- Input: Encoded injected id segment
+- Expected: 404 not found; no mass delete side effect
+
 ## RLS Validation Cases (after applying migration)
 
 1. User A selects own rows
@@ -68,3 +83,9 @@ Scope: FastAPI API endpoints, Next.js route guards, Supabase-authenticated flows
 
 4. User A deletes User B row
 - Expected: denied by RLS
+
+## Scripted SQLi Verification
+
+1. Run: ACCESS_TOKEN=<valid_jwt> npm run security:sqli
+2. Coverage: journal create/list/update/delete with classic SQLi payload strings
+3. Success criteria: payloads remain literals, statuses stay controlled, and cleanup completes

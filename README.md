@@ -193,6 +193,7 @@ npm run security:smoke
 | `npm start` | Run production Next.js server |
 | `npm run lint` | Run ESLint |
 | `npm run security:smoke` | Basic unauthorized/input checks |
+| `npm run security:sqli` | SQL injection abuse checks on journal CRUD |
 | `npm run security:identity` | Identity-binding validation (needs `ACCESS_TOKEN`) |
 | `npm run security:rls` | Cross-user RLS checks (needs 2 user tokens) |
 | `npm run validate:no-secrets` | Scan staged content for leaked secrets |
@@ -257,6 +258,7 @@ Security baseline and operations docs:
 ```bash
 npm run validate:no-secrets
 npm run security:smoke
+ACCESS_TOKEN="<valid_jwt>" npm run security:sqli
 ACCESS_TOKEN="<valid_jwt>" npm run security:identity
 ACCESS_TOKEN_A="<user_a_jwt>" ACCESS_TOKEN_B="<user_b_jwt>" \
 SUPABASE_URL="<your_url>" SUPABASE_ANON_KEY="<your_key>" npm run security:rls

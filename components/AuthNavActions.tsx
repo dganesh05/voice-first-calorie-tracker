@@ -31,9 +31,15 @@ export default function AuthNavActions({
     const supabase = getSupabaseClient();
 
     const syncSessionState = async () => {
-      const user = await getSessionUser(true);
-      if (isMounted) {
-        setIsSignedIn(Boolean(user));
+      try {
+        const user = await getSessionUser(true);
+        if (isMounted) {
+          setIsSignedIn(Boolean(user));
+        }
+      } catch {
+        if (isMounted) {
+          setIsSignedIn(false);
+        }
       }
     };
 

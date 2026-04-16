@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import AuthNavActions from "../components/AuthNavActions";
 
 const steps = [
   {
@@ -78,13 +79,22 @@ export default function Home() {
           <Link href="/profile">Profile</Link>
         </nav>
 
-        {/* MOBILE MENU BUTTON */}
-        <button
-          onClick={() => setMenuOpen(!menuOpen)}
-          className="md:hidden h-10 w-10 flex items-center justify-center rounded-full bg-white/10"
-        >
-          ☰
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="hidden md:flex">
+            <AuthNavActions
+              signInClassName="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
+              signOutClassName="rounded-full bg-white/10 px-4 py-2 text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
+            />
+          </div>
+
+          {/* MOBILE MENU BUTTON */}
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="md:hidden h-10 w-10 flex items-center justify-center rounded-full bg-white/10"
+          >
+            ☰
+          </button>
+        </div>
       </header>
 
       {/* MOBILE DROPDOWN */}
@@ -95,6 +105,12 @@ export default function Home() {
             <Link href="/logger" className="block p-3 rounded-xl hover:bg-white/10">Logger</Link>
             <Link href="/journal" className="block p-3 rounded-xl hover:bg-white/10">Journal</Link>
             <Link href="/profile" className="block p-3 rounded-xl hover:bg-white/10">Profile</Link>
+            <div className="pt-2">
+              <AuthNavActions
+                signInClassName="block rounded-xl bg-white/10 px-4 py-3 text-center text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
+                signOutClassName="block w-full rounded-xl bg-white/10 px-4 py-3 text-center text-sm text-white ring-1 ring-white/15 hover:bg-white/15"
+              />
+            </div>
           </div>
         </div>
       )}
