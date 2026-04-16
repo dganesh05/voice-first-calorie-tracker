@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "export",
   poweredByHeader: false,
   async headers() {
     const isProd = process.env.NODE_ENV === "production";
@@ -17,8 +18,7 @@ const nextConfig: NextConfig = {
       "font-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
       scriptSrc,
-      "connect-src 'self' https://*.supabase.co http://localhost:8000",
-      "object-src 'none'",
+      "connect-src 'self' https://*.supabase.co https://voice-first-calorie-tracker-oipo.onrender.com http://localhost:8000",      "object-src 'none'",
       "upgrade-insecure-requests",
     ].join("; ");
 
