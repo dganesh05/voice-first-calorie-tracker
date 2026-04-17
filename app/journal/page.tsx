@@ -49,6 +49,13 @@ type BackendJournalDayResponse = {
   remaining_calories?: number | null;
 };
 
+type ProfileGoalsResponse = {
+  daily_calorie_goal?: number | null;
+  protein_goal_g?: number | null;
+  carb_goal_g?: number | null;
+  fat_goal_g?: number | null;
+};
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -122,6 +129,7 @@ function mapEntriesToDays(entries: BackendJournalEntry[]): JournalDay[] {
 
 export default function JournalPage() {
   const [journalEntries, setJournalEntries] = useState<JournalDay[]>([]);
+  const [profileGoals, setProfileGoals] = useState<ProfileGoalsResponse | null>(null);
   const [todayStats, setTodayStats] = useState<{
     carbs: number;
     fat: number;
@@ -153,6 +161,17 @@ export default function JournalPage() {
         const data = await response.json();
         const mapped = mapEntriesToDays((data.entries ?? []) as BackendJournalEntry[]);
         setJournalEntries(mapped);
+
+        const profileResponse = await fetch(`${API_BASE_URL}/api/profile`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        if (profileResponse.ok) {
+          const profileData = (await profileResponse.json()) as ProfileGoalsResponse;
+          setProfileGoals(profileData);
+        }
 
         const todayDate = new Date().toISOString().slice(0, 10);
         const dayResponse = await fetch(
@@ -318,7 +337,8 @@ export default function JournalPage() {
     return Math.round(totalProteinAcrossDays / journalEntries.length);
   }, [journalEntries]);
 
-  const resolvedDailyGoal = todayStats?.calorieGoal ?? DAILY_GOAL;
+  const resolvedDailyGoal =
+    profileGoals?.daily_calorie_goal ?? todayStats?.calorieGoal ?? DAILY_GOAL;
   const remainingCalories =
     todayStats?.remainingCalories ?? Math.max(resolvedDailyGoal - todayCalories, 0);
   const progressPercent =
